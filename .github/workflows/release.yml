@@ -1,0 +1,151 @@
+# GitHub Actions release workflow.
+#
+# Fires on every `v*` tag push (`git tag v0.1.0 && git push --tags`).
+# Builds the .dmg on a macOS-14 runner (Apple Silicon, matches our
+# deployment target), signs the artefact with Sparkle's EdDSA key
+# (if the secret is configured), generates appcast.xml, and
+# attaches both to the GitHub Release as downloadable assets.
+#
+# The Sparkle private key must be added to the repo's GitHub Secrets
+# as `SPARKLE_ED_PRIVATE_KEY` (base64-encoded — exact output of
+# `./generate_keys -x -`). Without it, the workflow still produces
+# a working .dmg, but the appcast.xml ships unsigned and Sparkle
+# clients will refuse to install it. That's the right behaviour
+# pre-key-generation; users can still download manually.
+#
+# FRAGILITY:
+# * macos-14 image keeps Apple's tooling fresh, but Apple shifts
+#   default Xcode versions between runner image refreshes — pin
+#   below if a build ever breaks suddenly.
+# * `softprops/action-gh-release` is a third-party action. Pinned
+#   to a major version; revisit if its API changes.
+# * `sign_update` lives deep in the Sparkle SPM checkout's bin/ dir
+#   under DerivedData. The path can shift between Sparkle versions;
+#   we resolve it with `find` rather than hard-coding.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write   # action-gh-release needs this to create releases
+
+jobs:
+  build-and-release:
+    runs-on: macos-14
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Read version from tag
+        id: version
+        # GITHUB_REF is "refs/tags/v0.1.0"; strip the prefix.
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          version="${tag#v}"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "Building Carafe ${version} from tag ${tag}"
+
+      - name: Select Xcode
+        # macos-14 runners ship with multiple Xcode versions. We
+        # explicitly select a recent stable one so a runner-image
+        # refresh that swaps defaults can't silently break the build.
+        run: sudo xcode-select -s /Applications/Xcode_15.4.app
+
+      - name: Install build tooling
+        # xcodegen for the project, create-dmg for packaging.
+        # Both via Homebrew; the runner already has brew cached.
+        run: |
+          brew install xcodegen create-dmg
+
+      - name: Generate xcodeproj
+        run: xcodegen generate
+
+      - name: Build .dmg
+        env:
+          CARAFE_VERSION: ${{ steps.version.outputs.version }}
+        run: ./Tools/build-dmg.sh
+
+      - name: Resolve Sparkle's sign_update tool
+        id: sparkle
+        run: |
+          # `sign_update` is built as part of the SPM checkout. Search
+          # the runner's DerivedData (build-dmg.sh wrote into Tools/build/DerivedData).
+          path="$(find Tools/build/DerivedData -name sign_update -type f -perm -u+x 2>/dev/null | head -1)"
+          if [[ -z "$path" ]]; then
+              # Sparkle may also stash it under SourcePackages.
+              path="$(find Tools/build/DerivedData -path '*/artifacts/sparkle/*/bin/sign_update' 2>/dev/null | head -1)"
+          fi
+          if [[ -z "$path" ]]; then
+              echo "sign_update not found — appcast will be unsigned" >&2
+              echo "found=false" >> "$GITHUB_OUTPUT"
+          else
+              echo "Found sign_update at: $path"
+              echo "path=$path" >> "$GITHUB_OUTPUT"
+              echo "found=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Sign DMG with Sparkle EdDSA key
+        id: sign
+        if: steps.sparkle.outputs.found == 'true' && env.SPARKLE_ED_PRIVATE_KEY != ''
+        env:
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: |
+          dmg="Carafe-${{ steps.version.outputs.version }}.dmg"
+          # Restore the base64 private key to a file. sign_update reads
+          # it via stdin or `--ed-key-file`.
+          echo "${SPARKLE_ED_PRIVATE_KEY}" > /tmp/sparkle.key
+          chmod 600 /tmp/sparkle.key
+          # sign_update prints `sparkle:edSignature="…" length="…"` to stdout.
+          # We just need the signature attribute value.
+          raw="$('${{ steps.sparkle.outputs.path }}' "$dmg" --ed-key-file /tmp/sparkle.key)"
+          echo "sign_update output: $raw"
+          sig="$(echo "$raw" | sed -nE 's/.*sparkle:edSignature="([^"]+)".*/\1/p')"
+          if [[ -z "$sig" ]]; then
+              echo "Couldn't extract signature from sign_update output" >&2
+              exit 1
+          fi
+          echo "::add-mask::$sig"
+          echo "signature=$sig" >> "$GITHUB_OUTPUT"
+          rm -f /tmp/sparkle.key
+
+      - name: Generate appcast.xml
+        env:
+          # Point appcast download URLs at this repo, not the placeholder.
+          CARAFE_REPO: ${{ github.repository }}
+        run: |
+          ./Tools/generate-appcast.sh \
+              "${{ steps.version.outputs.version }}" \
+              "Carafe-${{ steps.version.outputs.version }}.dmg" \
+              "${{ steps.sign.outputs.signature || '' }}" \
+              > appcast.xml
+          echo "--- appcast.xml ---"
+          cat appcast.xml
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Carafe ${{ steps.version.outputs.version }}
+          generate_release_notes: true
+          files: |
+            Carafe-${{ steps.version.outputs.version }}.dmg
+            appcast.xml
+
+      - name: Summarize
+        run: |
+          echo "### Carafe ${{ steps.version.outputs.version }} released" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [[ -n "${{ steps.sign.outputs.signature || '' }}" ]]; then
+              echo "✅ DMG signed with Sparkle EdDSA key" >> "$GITHUB_STEP_SUMMARY"
+          else
+              echo "⚠️ DMG **not** signed — set the \`SPARKLE_ED_PRIVATE_KEY\` repo secret to enable in-app updates" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "[Open release](${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ steps.version.outputs.tag }})" >> "$GITHUB_STEP_SUMMARY"

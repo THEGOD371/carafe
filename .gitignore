@@ -1,0 +1,46 @@
+# Xcode
+build/
+DerivedData/
+*.xcuserstate
+*.xcuserdatad/
+xcuserdata/
+*.xcscmblueprint
+*.xccheckout
+
+# XcodeGen output — regenerate locally with `xcodegen generate`
+Carafe.xcodeproj/
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Packages/
+Package.resolved
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+
+# IDE
+.vscode/
+.idea/
+
+# Local artifacts
+*.dmg
+*.app.zip
+ExportOptions.plist
+*.pem
+*.p12
+
+# Wine bottles / runtime data (never committed)
+Bottles/
+prefixes/
+
+# Icon generator working dir (PNGs that get packed into Carafe/Resources/AppIcon.icns)
+Tools/build/
+
+# Release artifacts produced by Tools/build-dmg.sh
+*.dmg
+appcast.xml
