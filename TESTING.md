@@ -2675,7 +2675,7 @@ make sure no games / Steam are running first.
 - Settings → **About**. Expected:
   - Big wineglass icon, "Carafe" headline, "Version 0.1.0 (build 1)".
   - GitHub link is a real clickable Link (placeholder URL —
-    `github.com/carafe-app/carafe`. TODO before release: replace
+    `github.com/THEGOD371/carafe`. TODO before release: replace
     with the real repo URL).
   - Acknowledgements section lists Wine, GPTK, Gcenx, Winetricks,
     SteamGridDB. Each has an arrow-link icon that opens the
@@ -2917,7 +2917,7 @@ commands.
 
 Adds the Sparkle 2 framework via SPM, wires a "Check for Updates…"
 menu item, and arms a once-per-day background check on launch. The
-appcast URL points at the GitHub Releases of `carafe-app/carafe`
+appcast URL points at the GitHub Releases of `THEGOD371/carafe`
 (placeholder — replace with the real repo slug in `project.yml`
 before the first tagged release).
 
@@ -2982,7 +2982,7 @@ ls $APP/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/
                        $APP/Contents/Info.plist
 
 # Expected:
-#   https://github.com/carafe-app/carafe/releases/latest/download/appcast.xml
+#   https://github.com/THEGOD371/carafe/releases/latest/download/appcast.xml
 #   true
 #   86400
 #   false
@@ -3059,7 +3059,7 @@ Then `xcodegen generate` + rebuild. Verify:
 ### Replace the placeholder repo URL
 
 In `project.yml`, change the `SUFeedURL` from the
-`carafe-app/carafe` placeholder to the real repo slug. Also update:
+`THEGOD371/carafe` placeholder to the real repo slug. Also update:
 - The About tab GitHub link in `Carafe/App/SettingsView.swift`
   (`AboutTab.githubURL`).
 - The README.md once it exists (milestone B-5).

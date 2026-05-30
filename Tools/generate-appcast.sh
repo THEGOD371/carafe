@@ -24,7 +24,7 @@
 #
 #     https://github.com/<REPO>/releases/download/v<VERSION>/Carafe-<VERSION>.dmg
 #
-# `REPO` defaults to the placeholder `carafe-app/carafe` — override
+# `REPO` defaults to the placeholder `THEGOD371/carafe` — override
 # via env when calling. This will be set explicitly in the CI
 # workflow before the first real release.
 #
@@ -51,7 +51,7 @@ fi
 VERSION="$1"
 DMG_PATH="$2"
 ED_SIGNATURE="$3"
-REPO="${CARAFE_REPO:-carafe-app/carafe}"
+REPO="${CARAFE_REPO:-THEGOD371/carafe}"
 MINIMUM_MACOS="${CARAFE_MIN_MACOS:-14.0}"
 
 if [[ ! -f "${DMG_PATH}" ]]; then

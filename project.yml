@@ -89,13 +89,16 @@ targets:
         # the user to opt in to each update so botched releases don't
         # silently brick people's bottles.
         SUAutomaticallyUpdate: false
-        # SUPublicEDKey is INTENTIONALLY ABSENT until the release-
-        # engineering work in milestone B-2/B-3 generates the EdDSA
-        # key pair (`generate_keys` from the Sparkle distribution).
-        # Without it, Sparkle will let the user trigger a check but
-        # the actual install fails at signature validation — which is
-        # the correct behaviour pre-release. See TESTING.md →
-        # "Sparkle release engineering" for the one-time setup.
+        # EdDSA public key for Sparkle update verification. Generated
+        # by `Tools/build/DerivedData/.../Sparkle/bin/generate_keys`
+        # on 2026-05-30. The matching private key is held in the
+        # macOS Keychain (account: ed25519, service:
+        # https://sparkle-project.org) AND backed up at
+        # ~/Desktop/sparkle-private-key.txt — DO NOT lose it; once
+        # users install a build with this public key baked in, any
+        # update they receive must be signed by the corresponding
+        # private key or Sparkle refuses to install.
+        SUPublicEDKey: 0NnHZtm0hCogq6VvLC/tfdH/x63gybKEaYlbK+3R0Zs=
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.carafe.Carafe

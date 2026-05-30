@@ -45,7 +45,9 @@
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
 	<key>SUFeedURL</key>
-	<string>https://github.com/carafe-app/carafe/releases/latest/download/appcast.xml</string>
+	<string>https://github.com/THEGOD371/carafe/releases/latest/download/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>0NnHZtm0hCogq6VvLC/tfdH/x63gybKEaYlbK+3R0Zs=</string>
 	<key>SUScheduledCheckInterval</key>
 	<integer>86400</integer>
 </dict>
