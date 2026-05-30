@@ -35,8 +35,15 @@ ExportOptions.plist
 *.p12
 
 # Wine bottles / runtime data (never committed)
-Bottles/
-prefixes/
+# IMPORTANT: leading `/` anchors the pattern to the repo root so it
+# only matches a top-level `Bottles/` (which never appears in source
+# — the bottles live in ~/Library/Application Support/Carafe/Bottles).
+# Without the anchor, this rule also matches `Carafe/Core/Bottles/`
+# and silently excludes our Bottle.swift / BottleManager.swift etc.
+# from version control — which is how five source files almost
+# missed v0.1.0.
+/Bottles/
+/prefixes/
 
 # Icon generator working dir (PNGs that get packed into Carafe/Resources/AppIcon.icns)
 Tools/build/

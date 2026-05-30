@@ -10,14 +10,16 @@ import Foundation
 /// the backend on D3DMetal leaves stale .dll files lying around the
 /// prefix. The Compat UI warns about this.
 enum GraphicsBackend: String, Codable, CaseIterable, Identifiable, Sendable {
-    case d3dMetal = "d3dMetal"   // GPTK's built-in D3D → Metal translator. Default.
+    case d3dMetal = "d3dMetal"   // GPTK's built-in D3D → Metal translator. Default for GPTK bottles.
+    case dxmt     = "dxmt"        // 3Shain/DXMT — DX11/12 → Metal directly. Default for Wine Staging bottles.
     case dxvk     = "dxvk"        // DXVK (DirectX → Vulkan → Metal). Advanced, conflict-prone.
 
     var id: String { rawValue }
 
     var displayName: String {
         switch self {
-        case .d3dMetal: return "D3DMetal (recommended)"
+        case .d3dMetal: return "D3DMetal (recommended for GPTK)"
+        case .dxmt:     return "DXMT (Metal, recommended for Wine Staging)"
         case .dxvk:     return "DXVK (advanced)"
         }
     }
@@ -25,9 +27,11 @@ enum GraphicsBackend: String, Codable, CaseIterable, Identifiable, Sendable {
     var summary: String {
         switch self {
         case .d3dMetal:
-            return "Apple's DirectX-to-Metal translator built into GPTK. Best compatibility and performance for most games."
+            return "Apple's DirectX-to-Metal translator built into GPTK. Best for GPTK bottles; the Wine API surface it expects is older than what Wine Staging exposes."
+        case .dxmt:
+            return "Native DX11/12 → Metal via 3Shain/DXMT. No Vulkan hop. Built against modern Wine API surfaces — pairs well with Wine Staging. Carafe downloads + installs the DLLs into the bottle on first launch (~5 MB)."
         case .dxvk:
-            return "DXVK translates DirectX 9/10/11 → Vulkan → Metal via MoltenVK. Sometimes faster, but the prefix needs the `dxvk` winetricks verb installed, and it conflicts with D3DMetal."
+            return "DXVK translates DirectX 9/10/11 → Vulkan → Metal via MoltenVK. The extra Vulkan layer is slower than DXMT but covers DX9. The prefix needs the `dxvk` winetricks verb installed, and it conflicts with D3DMetal."
         }
     }
 }
@@ -181,10 +185,28 @@ struct ResolvedConfig: Sendable, Equatable {
     // MARK: - Derived env
 
     /// DLL overrides actually passed to wine, including the
-    /// graphics-backend-driven additions for DXVK.
+    /// graphics-backend-driven additions for DXVK and DXMT.
     var effectiveDLLOverrides: [String: String] {
         var d = dllOverrides
-        if graphicsBackend == .dxvk {
+        switch graphicsBackend {
+        case .d3dMetal:
+            // No overrides — wine uses its built-in DLLs which
+            // GPTK's D3DMetal hooks into directly.
+            break
+        case .dxmt:
+            // DXMT ships d3d11.dll + dxgi.dll (and optionally
+            // d3d10core.dll). `DXMTInstaller.installInto(bottle:)`
+            // copies the DLLs into the bottle's system32 on first
+            // launch; "n" (native first) tells wine to load them
+            // instead of its built-in implementations.
+            //
+            // FRAGILITY: keep this set in sync with
+            // `DXMTInstaller.dllNames`. If a future DXMT release
+            // adds d3d12.dll or d3d9.dll, expand BOTH places.
+            d["d3d11"] = "n"
+            d["dxgi"] = "n"
+            d["d3d10core"] = "n"
+        case .dxvk:
             // DXVK ships d3d9/d3d10core/d3d11/dxgi as native DLLs in
             // the prefix (winetricks dxvk verb installs them). Setting
             // these to "n" (native first) makes wine pick DXVK's DLLs

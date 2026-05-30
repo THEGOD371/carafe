@@ -208,6 +208,29 @@ struct CreateBottleSheet: View {
         }
     }
 
+    /// Pick the graphics backend the new bottle should start with.
+    ///
+    /// Rules, in order:
+    ///   1. If the bottle is Wine Staging AND the user hasn't moved
+    ///      the AppSettings default away from D3DMetal, use DXMT —
+    ///      it's empirically the best fit for Wine Staging (Metal-
+    ///      native, no Vulkan hop, modern Wine API surface).
+    ///   2. Otherwise use whatever the user set in
+    ///      Settings → Defaults.
+    ///
+    /// Trade-off (rule 1's heuristic): "user explicitly picked
+    /// D3DMetal in Settings" is indistinguishable from "user never
+    /// touched Settings". That collision matters very little —
+    /// picking D3DMetal as the global default while creating
+    /// wine-staging bottles is an unusual combination, and the per-
+    /// bottle/per-game compat config can still override per-launch.
+    private var effectiveGraphicsBackend: GraphicsBackend {
+        if wineBuild == .wineStaging && settings.defaultGraphicsBackend == .d3dMetal {
+            return .dxmt
+        }
+        return settings.defaultGraphicsBackend
+    }
+
     private func submit() {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
@@ -220,7 +243,7 @@ struct CreateBottleSheet: View {
                 windowsVersion: windowsVersion,
                 wineVersion: wineVersionLabel,
                 wineBuild: wineBuild,
-                graphicsBackend: settings.defaultGraphicsBackend
+                graphicsBackend: effectiveGraphicsBackend
             )
         }
         dismiss()

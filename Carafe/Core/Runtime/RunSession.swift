@@ -1,6 +1,15 @@
 import Foundation
 import AppKit
 
+/// Posted when `RunSession` successfully installs DXMT into a bottle.
+/// `BottleManager` listens for this so it can flip the in-memory
+/// + on-disk `installedComponents` ledger to include `"dxmt"`,
+/// short-circuiting the install on subsequent launches. UserInfo
+/// has a single key `"bottleID"` mapping to the bottle's `UUID`.
+extension Notification.Name {
+    static let carafeDidInstallDXMT = Notification.Name("dev.carafe.didInstallDXMT")
+}
+
 /// One launch of a Windows executable inside a bottle.
 ///
 /// State machine:
@@ -147,6 +156,47 @@ final class RunSession: ObservableObject, Identifiable {
             "Config: \(config.graphicsBackend.displayName), \(config.sync.displayName), Windows \(config.windowsVersion.displayName)\(config.metalHUD ? ", Metal HUD on" : "")\(config.retina ? ", Retina" : "")",
             stream: .info
         )
+
+        // --- Install DXMT into the bottle on first .dxmt launch ---
+        //
+        // Lazy install: we postpone the download + DLL copy until
+        // the user actually launches a game with the .dxmt backend
+        // selected. Once the DLLs are in the bottle's system32 and
+        // we've recorded "dxmt" in the installedComponents ledger,
+        // subsequent launches short-circuit this step.
+        //
+        // Failure here is fatal (the override set in
+        // ResolvedConfig.effectiveDLLOverrides points wine at native
+        // DXMT DLLs that wouldn't exist if install failed — game
+        // would crash on the first D3D11 call). Surface a clear
+        // error and bail before launch.
+        if config.graphicsBackend == .dxmt,
+           !bottle.installedComponents.contains("dxmt")
+        {
+            appendLog("Installing DXMT into bottle on first use…", stream: .info)
+            do {
+                try await DXMTInstaller.installInto(bottle: bottle) { [weak self] line in
+                    Task { @MainActor [weak self] in
+                        self?.appendLog(line, stream: .info)
+                    }
+                }
+                // Persist the ledger so subsequent launches skip
+                // the install step. Asks BottleManager via the
+                // shared instance through NotificationCenter would
+                // be cleaner but we don't have that wire — caller
+                // can also flip this after the session ends.
+                NotificationCenter.default.post(
+                    name: .carafeDidInstallDXMT,
+                    object: nil,
+                    userInfo: ["bottleID": bottle.id]
+                )
+            } catch {
+                transition(to: .failed(reason:
+                    "DXMT install failed: \(error.localizedDescription)"
+                ))
+                return
+            }
+        }
 
         // --- Apply Windows version override (if any) ---
         //
