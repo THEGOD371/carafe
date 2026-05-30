@@ -11,7 +11,7 @@
 //
 //   y=20–100   Carafe logo (small app-icon at 80×80)
 //   y=110–138  "Carafe" wordmark, centered, 30 pt
-//   y=145–168  "0.1.0" version label, centered, 16 pt
+//   y=145–168  "0.1.1" version label, centered, 16 pt
 //   y=201–329  Free zone where `create-dmg` will composite the
 //              .app and Applications icons (icon-size 128, centered
 //              on y=265)
@@ -249,13 +249,13 @@ drawCenteredText(
     visualTopY: 220   // pixel y=220 from visual top of canvas
 )
 
-// 5. "0.1.0" version label, muted.
+// 5. "0.1.1" version label, muted.
 let versionAttrs: [NSAttributedString.Key: Any] = [
     .font: NSFont.monospacedSystemFont(ofSize: 30, weight: .regular),
     .foregroundColor: cream.withAlphaComponent(0.60),
 ]
 drawCenteredText(
-    "0.1.0",
+    "0.1.1",
     attrs: versionAttrs,
     x: CGFloat(canvasWidth) / 2,
     visualTopY: 300   // pixel y=300 (sits ~10 px below the wordmark)

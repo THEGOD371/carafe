@@ -2673,7 +2673,7 @@ make sure no games / Steam are running first.
 ## P8. About tab
 
 - Settings → **About**. Expected:
-  - Big wineglass icon, "Carafe" headline, "Version 0.1.0 (build 1)".
+  - Big wineglass icon, "Carafe" headline, "Version 0.1.1 (build 1)".
   - GitHub link is a real clickable Link (placeholder URL —
     `github.com/THEGOD371/carafe`. TODO before release: replace
     with the real repo URL).
@@ -2696,7 +2696,7 @@ make sure no games / Steam are running first.
    when you ran a game from a moved bottle? Steam in particular —
    it stores absolute paths in its own configs.
 3. **P8** — replace the placeholder GitHub URL with the real one
-   before tagging 0.1.0. Edit `Self.githubURL` in
+   before tagging 0.1.1. Edit `Self.githubURL` in
    `SettingsView.swift`.
 4. Anything that *looks* wrong — typography, spacing, alignment.
    This pane is the user-facing front door for power features;
@@ -2733,7 +2733,7 @@ In a Terminal, against a fresh debug build:
 Expected:
 
     Carafe
-    0.1.0
+    0.1.1
     1
     AccentColor
 
@@ -3066,14 +3066,14 @@ In `project.yml`, change the `SUFeedURL` from the
 
 ## B-1.5. Per-release signing checklist
 
-For every tagged release (`git tag v0.1.0 && git push --tags`),
+For every tagged release (`git tag v0.1.1 && git push --tags`),
 GitHub Actions (B-3) does this automatically — but if you're
 shipping a manual release for emergency reasons, the procedure is:
 
 1. Build a release .dmg (milestone B-2 procedure).
 2. Sign the .dmg with Sparkle's `sign_update`:
    ```
-   ./sign_update Carafe-0.1.0.dmg
+   ./sign_update Carafe-0.1.1.dmg
    ```
    This prints a `sparkle:edSignature="..."` attribute.
 3. Build the appcast.xml entry for this release including that
@@ -3099,18 +3099,18 @@ prompt the user to install.
 
 After this comes **milestone B-2**: build a proper release `.dmg`
 with a dark gradient background, the Carafe logo, an Applications
-shortcut, and the volume name "Carafe 0.1.0".
+shortcut, and the volume name "Carafe 0.1.1".
 
 ---
 
 # Release milestone B-2 — DMG packaging
 
-`Tools/build-dmg.sh` produces a release-ready `Carafe-0.1.0.dmg` in
+`Tools/build-dmg.sh` produces a release-ready `Carafe-0.1.1.dmg` in
 the repo root. The script:
 
 1. Installs `create-dmg` via Homebrew if needed.
 2. Regenerates `Tools/build/dmg-background.png` (1320×800 procedural
-   background — gradient + Carafe logo + "Carafe 0.1.0" wordmark).
+   background — gradient + Carafe logo + "Carafe 0.1.1" wordmark).
 3. Builds the app in Release **without codesigning** (xcodebuild
    with `CODE_SIGNING_ALLOWED=NO`).
 4. Strips `com.apple.provenance` xattrs from the built bundle.
@@ -3118,7 +3118,7 @@ the repo root. The script:
    `XPCServices/*.xpc`, then `Sparkle.framework`, then the main app
    (with our entitlements).
 6. Runs `create-dmg` with the canonical layout (660×400 window,
-   128 px icons, volume name "Carafe 0.1.0").
+   128 px icons, volume name "Carafe 0.1.1").
 
 The deferred-codesign workaround is necessary because macOS 14+ /
 26.x tags every file the toolchain writes with `com.apple.provenance`
@@ -3137,29 +3137,29 @@ Expected: ~3–5 minutes (slower on first run when Homebrew installs
 create-dmg). Output:
 
 ```
-✓ Carafe-0.1.0.dmg
+✓ Carafe-0.1.1.dmg
   Size: ~7 MB (varies)
 ```
 
 ## B-2.2. Inspect the DMG
 
 ```
-hdiutil attach Carafe-0.1.0.dmg
+hdiutil attach Carafe-0.1.1.dmg
 ```
 
-Expected mount: `/Volumes/Carafe 0.1.0`. Verify:
+Expected mount: `/Volumes/Carafe 0.1.1`. Verify:
 
-- Volume name reads "Carafe 0.1.0" (Finder sidebar + window title).
+- Volume name reads "Carafe 0.1.1" (Finder sidebar + window title).
 - Window opens at 660×400 with the dark-gradient background.
 - App icon on the LEFT (~ x=165), Applications shortcut on the
   RIGHT (~ x=495), both centered on y=265.
-- The carafe logo + "Carafe" wordmark + "0.1.0" version sit above
+- The carafe logo + "Carafe" wordmark + "0.1.1" version sit above
   the icons in the top half of the window.
 
 Unmount before re-running the script:
 
 ```
-hdiutil detach "/Volumes/Carafe 0.1.0"
+hdiutil detach "/Volumes/Carafe 0.1.1"
 ```
 
 ## B-2.3. Install + first launch (Gatekeeper bypass)
@@ -3212,7 +3212,7 @@ the design just means editing the Swift file and re-running.
    step; subsequent runs are fast.
 2. **B-2.2** — does the DMG window look right? Specifically: the
    gradient + logo + wordmark layout, the icon positions, and
-   whether "Carafe 0.1.0" appears as the volume name.
+   whether "Carafe 0.1.1" appears as the volume name.
 3. **B-2.3** — does the right-click → Open bypass actually work?
    You should only need to do it once per .app per machine.
 4. Anything that looks visually off — icon spacing too tight or too
@@ -3235,12 +3235,12 @@ release workflow without actually pushing a tag. The pieces that
 are testable locally:
 
 - `./Tools/build-dmg.sh` — covered by B-2.
-- `./Tools/generate-appcast.sh 0.1.0 Carafe-0.1.0.dmg ""` — verify
+- `./Tools/generate-appcast.sh 0.1.1 Carafe-0.1.1.dmg ""` — verify
   the output is valid XML. The third arg (signature) is empty;
   Sparkle will refuse to install but the document is well-formed.
 
 ```
-./Tools/generate-appcast.sh 0.1.0 Carafe-0.1.0.dmg "" > /tmp/appcast.xml
+./Tools/generate-appcast.sh 0.1.1 Carafe-0.1.1.dmg "" > /tmp/appcast.xml
 xmllint --noout /tmp/appcast.xml && echo "appcast.xml parses"
 ```
 
@@ -3250,7 +3250,7 @@ When you have the GitHub repo set up, the Sparkle key generated,
 and the `SPARKLE_ED_PRIVATE_KEY` secret in place:
 
 ```
-git tag v0.1.0
+git tag v0.1.1
 git push --tags
 ```
 
@@ -3267,27 +3267,27 @@ Watch the workflow run in the **Actions** tab. Expected steps:
 10. Create GitHub Release
 11. Summarize
 
-End state: a new GitHub Release at `releases/tag/v0.1.0` with
-`Carafe-0.1.0.dmg` + `appcast.xml` attached, plus auto-generated
+End state: a new GitHub Release at `releases/tag/v0.1.1` with
+`Carafe-0.1.1.dmg` + `appcast.xml` attached, plus auto-generated
 release notes from the commit history since the previous tag.
 
 ## B-3.3. End-to-end Sparkle update test
 
-Once you've shipped v0.1.0 and v0.1.1:
-1. Install v0.1.0 from the v0.1.0 GitHub Release.
+Once you've shipped v0.1.1 and v0.1.1:
+1. Install v0.1.1 from the v0.1.1 GitHub Release.
 2. Run it. Wait for the daily background check OR click
    Carafe → Check for Updates….
 3. Expected: Sparkle reads the appcast at
    `https://github.com/<repo>/releases/latest/download/appcast.xml`,
    sees v0.1.1 is newer, verifies the EdDSA signature against the
-   `SUPublicEDKey` baked into v0.1.0, and prompts the user to
+   `SUPublicEDKey` baked into v0.1.1, and prompts the user to
    install.
 4. Click Install → Sparkle quits the app, swaps the bundle, relaunches.
 
 If the signature check fails, you'll see "Update Error" with a
 verification message. That means either: (a) the
 `SPARKLE_ED_PRIVATE_KEY` repo secret doesn't match the
-`SUPublicEDKey` in v0.1.0's Info.plist, or (b) something corrupted
+`SUPublicEDKey` in v0.1.1's Info.plist, or (b) something corrupted
 the signature in transit. Re-run `generate_keys` and start fresh.
 
 ## What to report back
@@ -3300,4 +3300,4 @@ the signature in transit. Re-run `generate_keys` and start fresh.
 3. **B-3.3** — does the full update flow work end-to-end? If yes,
    you've completed the release milestone.
 
-After B-3 the project is shipping-ready for 0.1.0 beta.
+After B-3 the project is shipping-ready for 0.1.1 beta.
