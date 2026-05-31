@@ -52,10 +52,23 @@ enum LegendaryInstaller {
     /// The version of Python's binary inside the formula.
     static let pythonBinaryName = "python3.12"
 
-    /// What we pip-install into the venv. Pinning by name only —
-    /// pip will fetch the latest matching version. Bump or change
-    /// (e.g. to a git+ URL for Heroic's fork) when needed.
-    static let pipPackageSpec = "legendary-gl"
+    /// What we pip-install into the venv.
+    ///
+    /// We pull from the upstream git repository's default branch
+    /// rather than the PyPI package, because the PyPI package
+    /// (`legendary-gl`) hasn't seen a release in 12+ months as of
+    /// 2026 while the GitHub repo continues to receive auth-related
+    /// fixes for Epic's rotating API. `pip install git+<url>` always
+    /// fetches HEAD; if we ever need a deterministic version pin,
+    /// add `@<tag-or-sha>` to the spec.
+    ///
+    /// FRAGILITY: this whole Epic-via-legendary path is dormant in
+    /// v0.1.x (no UI surface — see comment in LibraryGridView). The
+    /// venv + binary are still installed lazily when something calls
+    /// `LegendaryInstaller.install`, so the package spec just needs
+    /// to be something that resolves — but bumps here have no user-
+    /// visible effect until/unless we re-expose the legendary flow.
+    static let pipPackageSpec = "git+https://github.com/legendary-gl/legendary"
 
     // MARK: - Paths
 

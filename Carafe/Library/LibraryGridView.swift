@@ -25,8 +25,14 @@ struct LibraryGridView: View {
     @State private var showingInstallSteam = false
     @State private var addSteamGameTarget: SteamMenuTarget?
 
-    /// Add-from-Epic flow sheet (legendary CLI under the hood).
-    @State private var showingAddEpic = false
+    // Native Epic integration via legendary CLI (AddEpicGameSheet,
+    // EpicAuth, LegendaryInstaller) is dormant: Epic's 2FA + redirect-
+    // page transience made every auth flow we tried unreliable. Users
+    // who want Epic games install Heroic Games Launcher; HeroicScanner
+    // picks up their library automatically (see the "From Heroic"
+    // section in the grid + the Connect Heroic prompt in the empty
+    // state). The Swift core stays in tree for a possible future
+    // revival once legendary upstream's auth story improves.
 
     /// Identifiable wrapper so .sheet(item:) re-presents reliably even
     /// when the underlying bottleID stays the same across opens.
@@ -76,9 +82,6 @@ struct LibraryGridView: View {
         }
         .sheet(item: $addSteamGameTarget) { target in
             AddSteamGameSheet(initialBottleID: target.bottleID)
-        }
-        .sheet(isPresented: $showingAddEpic) {
-            AddEpicGameSheet()
         }
         .confirmationDialog(
             "Remove “\(deleteCandidate?.name ?? "")” from your library?",
@@ -137,17 +140,6 @@ struct LibraryGridView: View {
             .help("Steam install + add games")
         }
         ToolbarItem(placement: .primaryAction) {
-            // "Add from Epic" — opens the multi-phase legendary flow.
-            // Never disabled: the sheet's setup phase handles missing
-            // Homebrew / Python / legendary with a clear error.
-            Button {
-                showingAddEpic = true
-            } label: {
-                Label("Epic", systemImage: "gamecontroller")
-            }
-            .help("Sign in to Epic Games and install owned titles via legendary")
-        }
-        ToolbarItem(placement: .primaryAction) {
             Button {
                 showingAdd = true
             } label: {
@@ -163,6 +155,49 @@ struct LibraryGridView: View {
     }
 
     // MARK: - Empty state
+
+    /// Suggestion card shown beneath the empty state's primary CTA
+    /// when no Heroic install was detected. Carafe's Epic + GOG
+    /// story currently goes through Heroic (whose own auth +
+    /// download flow is much more reliable than what we could build
+    /// directly atop legendary), so pointing users at it
+    /// pre-emptively shortens the "where do I get Epic games from"
+    /// path for the dominant use case.
+    @ViewBuilder
+    private var connectHeroicPrompt: some View {
+        VStack(spacing: 8) {
+            Divider()
+                .padding(.horizontal, 60)
+                .padding(.vertical, 6)
+
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "shippingbox.and.arrow.backward.fill")
+                    .font(.title3)
+                    .foregroundStyle(.tint)
+                    .padding(.top, 2)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Want Epic or GOG games?")
+                        .font(.callout.weight(.semibold))
+                    Text("Install Heroic Games Launcher and sign into your Epic / GOG account there. Carafe will detect Heroic and show your library here automatically.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button {
+                        if let url = URL(string: "https://heroicgameslauncher.com") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    } label: {
+                        Label("Download Heroic", systemImage: "arrow.down.circle")
+                    }
+                    .controlSize(.regular)
+                    .padding(.top, 4)
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: 460, alignment: .leading)
+        }
+        .padding(.top, 12)
+    }
 
     private var emptyState: some View {
         VStack(spacing: 16) {
@@ -202,6 +237,15 @@ struct LibraryGridView: View {
             .buttonStyle(.borderedProminent)
             .padding(.top, 12)
             .disabled(bottles.entries.compactMap(\.validBottle).isEmpty || !WineRunner.isWineAvailable)
+
+            // Suggest Heroic when it isn't installed. Hidden once the
+            // scanner detects a Heroic config — at that point the
+            // "From Heroic" section in the grid is the discoverable
+            // path and this prompt would be redundant noise.
+            if !heroicScanner.isInstalled {
+                connectHeroicPrompt
+            }
+
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
