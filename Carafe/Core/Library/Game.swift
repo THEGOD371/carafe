@@ -36,6 +36,14 @@ struct Game: Identifiable, Hashable, Codable, Sendable {
     /// badge on the tile and (in future) look up cover art by appid
     /// rather than fuzzy name search. Decoded with decodeIfPresent.
     var steamAppID: Int?
+
+    /// Epic appName when this entry was added via the Add-from-Epic
+    /// flow (legendary's internal identifier). nil for non-Epic
+    /// entries. Drives the Epic badge on the tile and lets us
+    /// re-invoke legendary for the same game (verify integrity,
+    /// uninstall, update). Decoded with decodeIfPresent for backward
+    /// compat with library.json files written before this milestone.
+    var epicAppName: String?
 }
 
 /// Where the game's exe lives. We keep this as a sum type so a bottle

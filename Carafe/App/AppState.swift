@@ -25,12 +25,19 @@ final class AppState: ObservableObject {
     /// library.json — Heroic is the source of truth.
     let heroicScanner: HeroicScanner
 
+    /// Carafe-native Epic Games Store integration via the `legendary`
+    /// CLI. Tracks login state; the Add-from-Epic sheet drives the
+    /// auth + install pipeline through this and through
+    /// `EpicLibrary`/`LegendaryRunner`.
+    let epicAuth: EpicAuth
+
     init() {
         self.onboardingComplete = UserDefaults.standard.bool(forKey: Keys.onboardingComplete)
         let bottleManager = BottleManager()
         self.bottles = bottleManager
         self.library = GameLibrary(bottles: bottleManager)
         self.heroicScanner = HeroicScanner()
+        self.epicAuth = EpicAuth()
     }
 
     /// Root path for all on-disk state: ~/Library/Application Support/Carafe.

@@ -25,6 +25,9 @@ struct LibraryGridView: View {
     @State private var showingInstallSteam = false
     @State private var addSteamGameTarget: SteamMenuTarget?
 
+    /// Add-from-Epic flow sheet (legendary CLI under the hood).
+    @State private var showingAddEpic = false
+
     /// Identifiable wrapper so .sheet(item:) re-presents reliably even
     /// when the underlying bottleID stays the same across opens.
     struct SteamMenuTarget: Identifiable {
@@ -73,6 +76,9 @@ struct LibraryGridView: View {
         }
         .sheet(item: $addSteamGameTarget) { target in
             AddSteamGameSheet(initialBottleID: target.bottleID)
+        }
+        .sheet(isPresented: $showingAddEpic) {
+            AddEpicGameSheet()
         }
         .confirmationDialog(
             "Remove “\(deleteCandidate?.name ?? "")” from your library?",
@@ -129,6 +135,17 @@ struct LibraryGridView: View {
                 Label("Steam", systemImage: "gamecontroller.fill")
             }
             .help("Steam install + add games")
+        }
+        ToolbarItem(placement: .primaryAction) {
+            // "Add from Epic" — opens the multi-phase legendary flow.
+            // Never disabled: the sheet's setup phase handles missing
+            // Homebrew / Python / legendary with a clear error.
+            Button {
+                showingAddEpic = true
+            } label: {
+                Label("Epic", systemImage: "gamecontroller")
+            }
+            .help("Sign in to Epic Games and install owned titles via legendary")
         }
         ToolbarItem(placement: .primaryAction) {
             Button {
@@ -428,6 +445,9 @@ struct GameTileView: View {
             }
             // Steam badge — bottom-right corner when this game was
             // added via the Add Steam Game flow (game.steamAppID set).
+            // Epic badge sits in the same spot when epicAppName is
+            // set; the two are mutually exclusive in practice (a Game
+            // entry comes from exactly one launcher source).
             if game.steamAppID != nil {
                 VStack {
                     Spacer()
@@ -439,6 +459,24 @@ struct GameTileView: View {
                             .padding(.horizontal, 6).padding(.vertical, 3)
                             .background(Color.blue.opacity(0.85))
                             .clipShape(Capsule())
+                    }
+                }
+                .padding(8)
+            } else if game.epicAppName != nil {
+                VStack {
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        HStack(spacing: 3) {
+                            Image(systemName: "gamecontroller")
+                                .font(.caption2.weight(.semibold))
+                            Text("Epic")
+                                .font(.caption2.weight(.semibold))
+                        }
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 6).padding(.vertical, 3)
+                        .background(Color(red: 0.12, green: 0.12, blue: 0.14).opacity(0.95))
+                        .clipShape(Capsule())
                     }
                 }
                 .padding(8)
