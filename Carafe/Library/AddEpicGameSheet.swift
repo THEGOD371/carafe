@@ -180,24 +180,82 @@ struct AddEpicGameSheet: View {
                     .disabled(isWorking)
 
                 default:
-                    Text("Step 1 — Open the Epic login page in your browser.")
-                        .font(.callout.weight(.medium))
-                    Button {
-                        epicAuth.openLoginPage()
-                    } label: {
-                        Label("Open Epic Login", systemImage: "safari")
-                    }
-                    .buttonStyle(.borderedProminent)
-
-                    Text("Step 2 — Sign in with your Epic Games credentials. After you sign in, the page redirects to a URL that includes a `sid=…` value. Copy that SID value.")
-                        .font(.callout)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    Text("Step 3 — Paste the SID below and click Continue.")
-                        .font(.callout.weight(.medium))
-                    TextField("SID from the redirect URL", text: $sidInput)
-                        .textFieldStyle(.roundedBorder)
+                    // ---- Step 1: open login page ----
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label("Step 1 — Sign into Epic", systemImage: "1.circle.fill")
+                            .font(.callout.weight(.semibold))
+                        Text("Click below to open Epic's login page in your browser. Sign in with your Epic Games credentials and stay on the resulting page — don't close the tab.")
+                            .font(.callout).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button {
+                            epicAuth.openLoginPage()
+                        } label: {
+                            Label("Open Epic Login", systemImage: "safari")
+                        }
+                        .buttonStyle(.borderedProminent)
                         .disabled(isWorking)
+                    }
+
+                    Divider()
+
+                    // ---- Step 2: paste the SID-redirect URL into the SAME browser ----
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label("Step 2 — Visit the SID URL in the same browser",
+                              systemImage: "2.circle.fill")
+                            .font(.callout.weight(.semibold))
+                        Text("After you're signed in, paste this URL into the SAME browser's address bar. Epic will append a `sid=…` value and redirect you to a normal Epic store page that stays open — your address bar will then show the SID.")
+                            .font(.callout).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        HStack(alignment: .center, spacing: 8) {
+                            Text(EpicAuth.sidRedirectURL.absoluteString)
+                                .font(.caption.monospaced())
+                                .textSelection(.enabled)
+                                .lineLimit(2)
+                                .truncationMode(.middle)
+                                .padding(8)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Color(NSColor.textBackgroundColor).opacity(0.6))
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                            Button {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(
+                                    EpicAuth.sidRedirectURL.absoluteString,
+                                    forType: .string
+                                )
+                            } label: {
+                                Label("Copy URL", systemImage: "doc.on.clipboard")
+                            }
+                            .disabled(isWorking)
+                            .help("Copy the SID URL to your clipboard")
+                        }
+                    }
+
+                    Divider()
+
+                    // ---- Step 3: paste the resulting URL back in here ----
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label("Step 3 — Paste the resulting URL back here",
+                              systemImage: "3.circle.fill")
+                            .font(.callout.weight(.semibold))
+                        Text("Copy the ENTIRE URL from your browser's address bar after step 2's redirect lands. It will look like `https://www.epicgames.com/store/en-US/?sid=…`. Carafe extracts the SID automatically.")
+                            .font(.callout).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        TextField(
+                            "https://www.epicgames.com/store/en-US/?sid=…",
+                            text: $sidInput,
+                            axis: .vertical
+                        )
+                        .textFieldStyle(.roundedBorder)
+                        .lineLimit(2...4)
+                        .disabled(isWorking)
+
+                        // Live feedback so the user knows whether
+                        // their paste produced a valid SID before
+                        // they click Continue.
+                        sidExtractionHint
+                    }
                 }
 
                 if let err = errorMessage {
@@ -215,16 +273,56 @@ struct AddEpicGameSheet: View {
             return
         }
         guard !isWorking else { return }
+        // Pull the SID out of whatever the user pasted (full URL or
+        // bare token). `authButtonDisabled` already gates this, so
+        // extraction normally succeeds — but be defensive in case
+        // they tab past the disabled check.
+        guard let sid = EpicAuth.extractSID(from: sidInput) else {
+            errorMessage = "Couldn't find a SID value in what you pasted. Paste the full URL from your browser's address bar — it should contain `?sid=…`."
+            return
+        }
         isWorking = true
         defer { isWorking = false }
         errorMessage = nil
         do {
-            try await epicAuth.completeLogin(sid: sidInput)
+            try await epicAuth.completeLogin(sid: sid)
             sidInput = ""
             phase = .library
             await loadOwnedGames()
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Live feedback below the SID paste field. Renders one of:
+    ///   * Nothing (empty input)
+    ///   * Green "extracted SID: …" when the parser found one
+    ///   * Orange "couldn't find a SID" hint otherwise
+    @ViewBuilder
+    private var sidExtractionHint: some View {
+        let trimmed = sidInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            EmptyView()
+        } else if let extracted = EpicAuth.extractSID(from: trimmed) {
+            HStack(spacing: 6) {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                Text("SID found: ")
+                    .font(.caption).foregroundStyle(.secondary)
+                Text(extracted)
+                    .font(.caption.monospaced())
+                    .textSelection(.enabled)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+        } else {
+            HStack(alignment: .top, spacing: 6) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                Text("Couldn't find `sid=…` in that text. Make sure you copied the URL *after* the step-2 redirect lands on the Epic store page.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
@@ -487,7 +585,10 @@ struct AddEpicGameSheet: View {
     private var authButtonDisabled: Bool {
         if isWorking { return true }
         if case .loggedIn = epicAuth.status { return false }
-        return sidInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        // Require a parseable SID before Continue lights up — the
+        // user gets live feedback below the field about whether
+        // their paste worked.
+        return EpicAuth.extractSID(from: sidInput) == nil
     }
 
     // MARK: - Helpers

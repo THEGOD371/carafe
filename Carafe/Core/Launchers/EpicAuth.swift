@@ -43,15 +43,37 @@ final class EpicAuth: ObservableObject {
 
     @Published private(set) var status: Status = .notReady
 
-    /// The Epic OAuth login URL legendary uses. Opening this in a
-    /// browser kicks off the auth code flow; the redirect lands on a
-    /// page whose URL contains `?sid=<value>` which the user copies
-    /// back into Carafe.
+    /// Plain Epic login page — no auto-redirect. We open this first
+    /// so the user signs into their Epic account; after sign-in
+    /// they're on whatever Epic dashboard their account lands on,
+    /// and the page stays open long enough to read.
+    ///
+    /// The user then manually navigates to `sidRedirectURL` (we
+    /// give them a Copy URL button) to get the SID appended to
+    /// their address bar.
     nonisolated static let loginURL = URL(string:
-        "https://www.epicgames.com/id/login?redirectUrl=" +
-        "https%3A%2F%2Fwww.epicgames.com%2Fid%2Fapi%2Fredirect" +
-        "%3FclientId%3D34a02cf8f4414e29b15921876da36f9a" +
-        "%26responseType%3Dcode"
+        "https://www.epicgames.com/id/login"
+    )!
+
+    /// SID-extraction URL. The user pastes this into the SAME
+    /// browser after signing in via `loginURL`. Epic's redirect API
+    /// observes that the user is authenticated, generates a fresh
+    /// SID for legendary's client ID, and redirects to the
+    /// `redirectUrl` query parameter (the Epic store — a normal
+    /// page that does NOT auto-close) with the SID appended as
+    /// `?sid=<value>`.
+    ///
+    /// The user then copies the FULL final URL from their address
+    /// bar and pastes it into Carafe. `extractSID(from:)` parses
+    /// out the SID.
+    ///
+    /// FRAGILITY: the `clientId` matches legendary's hardcoded
+    /// value. If Epic ever rotates it, legendary's upstream breaks
+    /// first and we follow — bump this constant to match.
+    nonisolated static let sidRedirectURL = URL(string:
+        "https://www.epicgames.com/id/api/redirect" +
+        "?clientId=34a02cf8f4414e29b15921876da36f9a" +
+        "&redirectUrl=https%3A%2F%2Fwww.epicgames.com%2Fstore%2Fen-US%2F"
     )!
 
     /// Pull the current Epic auth status from legendary. Updates
@@ -109,10 +131,58 @@ final class EpicAuth: ObservableObject {
     }
 
     /// Open the Epic login page in the user's default browser. The
-    /// resulting redirect page contains a `?sid=…` query parameter
-    /// the user pastes back into the sheet.
+    /// page does not auto-redirect; after sign-in the user
+    /// separately visits `sidRedirectURL` to obtain the SID.
     func openLoginPage() {
         NSWorkspace.shared.open(Self.loginURL)
+    }
+
+    /// Open `sidRedirectURL` directly. The auth sheet's primary path
+    /// gives the user a Copy URL button (so they paste it manually
+    /// into the same browser session as their login) — this helper
+    /// exists for the convenience case where they want one-click
+    /// access from inside Carafe.
+    func openSIDRedirect() {
+        NSWorkspace.shared.open(Self.sidRedirectURL)
+    }
+
+    /// Pull a SID value out of whatever the user pasted into the
+    /// auth field. Three shapes handled:
+    ///   1. Full URL with `?sid=<value>` query param — what they get
+    ///      from the address bar after `sidRedirectURL` resolves.
+    ///      Extracted via `URLComponents`.
+    ///   2. Bare alphanumeric SID (Epic's tokens are hex-like,
+    ///      32+ chars). Accepted as-is if the input looks like one.
+    ///   3. Anything else → nil. The UI surfaces a "couldn't find
+    ///      a SID" hint and the Continue button stays disabled.
+    ///
+    /// Nonisolated so the sheet's `.disabled(authButtonDisabled)`
+    /// binding can evaluate it on the SwiftUI rendering thread
+    /// without bouncing through the actor.
+    nonisolated static func extractSID(from input: String) -> String? {
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        // Shape 1 — URL with sid query param.
+        if let url = URL(string: trimmed),
+           let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+           let sid = components.queryItems?
+                .first(where: { $0.name.lowercased() == "sid" })?.value,
+           !sid.isEmpty
+        {
+            return sid
+        }
+
+        // Shape 2 — bare SID. Epic's tokens are alphanumeric and
+        // long enough that we can heuristically distinguish them
+        // from typed gibberish.
+        if trimmed.count >= 16,
+           trimmed.allSatisfy({ $0.isLetter || $0.isNumber })
+        {
+            return trimmed
+        }
+
+        return nil
     }
 
     /// Hand a SID code from the redirect URL to legendary, which
