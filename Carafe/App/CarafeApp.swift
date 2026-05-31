@@ -18,6 +18,7 @@ struct CarafeApp: App {
                 .environmentObject(appState)
                 .environmentObject(appState.bottles)
                 .environmentObject(appState.library)
+                .environmentObject(appState.heroicScanner)
                 .environmentObject(settings)
                 .frame(minWidth: 900, minHeight: 600)
         }

@@ -20,11 +20,17 @@ final class AppState: ObservableObject {
     /// detection — created after `bottles` and passed a weak ref.
     let library: GameLibrary
 
+    /// Detects + parses a Heroic Games Launcher install (Epic + GOG
+    /// libraries). Ephemeral: never persisted into Carafe's
+    /// library.json — Heroic is the source of truth.
+    let heroicScanner: HeroicScanner
+
     init() {
         self.onboardingComplete = UserDefaults.standard.bool(forKey: Keys.onboardingComplete)
         let bottleManager = BottleManager()
         self.bottles = bottleManager
         self.library = GameLibrary(bottles: bottleManager)
+        self.heroicScanner = HeroicScanner()
     }
 
     /// Root path for all on-disk state: ~/Library/Application Support/Carafe.

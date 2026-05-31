@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 struct LibraryGridView: View {
     @EnvironmentObject private var library: GameLibrary
     @EnvironmentObject private var bottles: BottleManager
+    @EnvironmentObject private var heroicScanner: HeroicScanner
 
     @State private var showingAdd = false
     @State private var editingGame: Game?
@@ -38,7 +39,11 @@ struct LibraryGridView: View {
 
     var body: some View {
         Group {
-            if library.games.isEmpty {
+            // Empty-state only when BOTH Carafe-managed AND Heroic-
+            // imported sections are empty. If the user has zero
+            // Carafe games but Heroic detected, we show the grid (so
+            // their Heroic library is reachable on day-one).
+            if library.games.isEmpty && heroicScanner.games.isEmpty {
                 emptyState
             } else {
                 grid
@@ -190,32 +195,77 @@ struct LibraryGridView: View {
 
     private var grid: some View {
         ScrollView {
-            LazyVGrid(columns: columns, spacing: 22) {
-                ForEach(library.games) { game in
-                    GameTileView(
-                        game: game,
-                        status: library.status(of: game),
-                        coverURL: library.coverArtURL(for: game),
-                        onPlay: { launchingGame = game },
-                        onEdit: { editingGame = game },
-                        onShowInFinder: { showInFinder(game) },
-                        onRemove: { deleteCandidate = game },
-                        onRelocateExe: { relocateExe(for: game) },
-                        onRemap: { remapCandidate = game },
-                        onInstallComponents: {
-                            if let bottle = library.bottle(for: game) {
-                                componentsTarget = bottle
-                            }
-                        },
-                        onEditCompatibility: { compatTarget = game },
-                        onPickLocalCover: { pickLocalCover(for: game) },
-                        onDropLocalCover: { url in
-                            library.setCoverArt(for: game, fromLocalFile: url)
+            VStack(alignment: .leading, spacing: 28) {
+                // Carafe-managed games (the canonical library). Only
+                // rendered when there are any — keeps the layout clean
+                // for users with a Heroic-only library.
+                if !library.games.isEmpty {
+                    LazyVGrid(columns: columns, spacing: 22) {
+                        ForEach(library.games) { game in
+                            GameTileView(
+                                game: game,
+                                status: library.status(of: game),
+                                coverURL: library.coverArtURL(for: game),
+                                onPlay: { launchingGame = game },
+                                onEdit: { editingGame = game },
+                                onShowInFinder: { showInFinder(game) },
+                                onRemove: { deleteCandidate = game },
+                                onRelocateExe: { relocateExe(for: game) },
+                                onRemap: { remapCandidate = game },
+                                onInstallComponents: {
+                                    if let bottle = library.bottle(for: game) {
+                                        componentsTarget = bottle
+                                    }
+                                },
+                                onEditCompatibility: { compatTarget = game },
+                                onPickLocalCover: { pickLocalCover(for: game) },
+                                onDropLocalCover: { url in
+                                    library.setCoverArt(for: game, fromLocalFile: url)
+                                }
+                            )
                         }
-                    )
+                    }
+                }
+
+                // Heroic-imported games. Rendered after the Carafe
+                // games with a section header that doubles as a
+                // refresh control. Hidden entirely when no Heroic
+                // games were detected.
+                if !heroicScanner.games.isEmpty {
+                    heroicSection
                 }
             }
             .padding(24)
+        }
+    }
+
+    @ViewBuilder
+    private var heroicSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 8) {
+                Image(systemName: "shippingbox.and.arrow.backward.fill")
+                    .foregroundStyle(.tint)
+                Text("From Heroic")
+                    .font(.title3.weight(.semibold))
+                Text("(\(heroicScanner.games.count))")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button {
+                    Task { await heroicScanner.scan() }
+                } label: {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.borderless)
+                .help("Re-read Heroic's library files")
+            }
+            .padding(.top, library.games.isEmpty ? 0 : 8)
+
+            LazyVGrid(columns: columns, spacing: 22) {
+                ForEach(heroicScanner.games) { game in
+                    HeroicTileView(game: game)
+                }
+            }
         }
     }
 
