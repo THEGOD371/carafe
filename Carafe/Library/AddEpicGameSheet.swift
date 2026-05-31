@@ -180,43 +180,36 @@ struct AddEpicGameSheet: View {
                     .disabled(isWorking)
 
                 default:
-                    // ---- Step 1: open login page ----
+                    // ---- Step 1: open the SID URL directly ----
+                    //
+                    // The redirect URL handles BOTH the signed-in
+                    // and signed-out cases natively:
+                    //   * signed in → Epic immediately appends a
+                    //     fresh ?sid=<value> and lands on the store.
+                    //   * signed out → Epic shows its login page,
+                    //     then completes the redirect once the user
+                    //     signs in. Either way, the user ends up on
+                    //     a normal page with the SID in the address
+                    //     bar. No reason to make this a two-step
+                    //     dance for the (much more common) already-
+                    //     signed-in path.
                     VStack(alignment: .leading, spacing: 6) {
-                        Label("Step 1 — Sign into Epic", systemImage: "1.circle.fill")
+                        Label("Step 1 — Open the SID URL in your browser",
+                              systemImage: "1.circle.fill")
                             .font(.callout.weight(.semibold))
-                        Text("Click below to open Epic's login page in your browser. Sign in with your Epic Games credentials and stay on the resulting page — don't close the tab.")
-                            .font(.callout).foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Button {
-                            epicAuth.openLoginPage()
-                        } label: {
-                            Label("Open Epic Login", systemImage: "safari")
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(isWorking)
-                    }
-
-                    Divider()
-
-                    // ---- Step 2: paste the SID-redirect URL into the SAME browser ----
-                    VStack(alignment: .leading, spacing: 6) {
-                        Label("Step 2 — Visit the SID URL in the same browser",
-                              systemImage: "2.circle.fill")
-                            .font(.callout.weight(.semibold))
-                        Text("After you're signed in, paste this URL into the SAME browser's address bar. Epic will append a `sid=…` value and redirect you to a normal Epic store page that stays open — your address bar will then show the SID.")
+                        Text("Click below. If you're already signed in to Epic, your browser lands on the Epic store with `?sid=…` appended to the address bar. If you aren't signed in, Epic prompts you first, then completes the redirect.")
                             .font(.callout).foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
 
-                        HStack(alignment: .center, spacing: 8) {
-                            Text(EpicAuth.sidRedirectURL.absoluteString)
-                                .font(.caption.monospaced())
-                                .textSelection(.enabled)
-                                .lineLimit(2)
-                                .truncationMode(.middle)
-                                .padding(8)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(Color(NSColor.textBackgroundColor).opacity(0.6))
-                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                        HStack(spacing: 8) {
+                            Button {
+                                epicAuth.openSIDRedirect()
+                            } label: {
+                                Label("Open SID URL", systemImage: "safari")
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(isWorking)
+
                             Button {
                                 NSPasteboard.general.clearContents()
                                 NSPasteboard.general.setString(
@@ -227,18 +220,33 @@ struct AddEpicGameSheet: View {
                                 Label("Copy URL", systemImage: "doc.on.clipboard")
                             }
                             .disabled(isWorking)
-                            .help("Copy the SID URL to your clipboard")
+                            .help("Copy the URL if you'd rather paste it into a different browser.")
                         }
+
+                        // Escape hatch: the rare user who wants to
+                        // switch accounts before grabbing a SID.
+                        // Renders as small secondary text so it
+                        // doesn't compete with the primary button.
+                        Button {
+                            epicAuth.openLoginPage()
+                        } label: {
+                            Text("Need to switch Epic accounts first? Open the login page →")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.link)
+                        .disabled(isWorking)
+                        .padding(.top, 4)
                     }
 
                     Divider()
 
-                    // ---- Step 3: paste the resulting URL back in here ----
+                    // ---- Step 2: paste the resulting URL back in here ----
                     VStack(alignment: .leading, spacing: 6) {
-                        Label("Step 3 — Paste the resulting URL back here",
-                              systemImage: "3.circle.fill")
+                        Label("Step 2 — Paste the resulting URL back here",
+                              systemImage: "2.circle.fill")
                             .font(.callout.weight(.semibold))
-                        Text("Copy the ENTIRE URL from your browser's address bar after step 2's redirect lands. It will look like `https://www.epicgames.com/store/en-US/?sid=…`. Carafe extracts the SID automatically.")
+                        Text("Copy the ENTIRE URL from your browser's address bar after Step 1 lands. It will look like `https://www.epicgames.com/store/en-US/?sid=…`. Carafe extracts the SID automatically.")
                             .font(.callout).foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
 
