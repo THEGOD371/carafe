@@ -51,8 +51,22 @@ struct AddEpicGameSheet: View {
     /// action button and shows a progress indicator.
     @State private var isWorking: Bool = false
 
-    /// User's paste of the SID code from the Epic login redirect.
-    @State private var sidInput: String = ""
+    /// Sub-state inside the .auth phase:
+    /// * `.idle` — primary "Sign in to Epic" button visible.
+    /// * `.attemptingImport` — `legendary auth --import` is running.
+    /// * `.manualPaste` — `--import` failed or wasn't available; the
+    ///   user is in the browser flow with a paste field for the
+    ///   authorizationCode from Epic's JSON redirect page.
+    private enum AuthStep: Equatable {
+        case idle
+        case attemptingImport
+        case manualPaste
+    }
+    @State private var authStep: AuthStep = .idle
+
+    /// User's paste of the authorizationCode value from the JSON
+    /// page Epic shows after sign-in.
+    @State private var codeInput: String = ""
 
     /// All owned Epic games (populated when phase enters .library).
     @State private var ownedGames: [EpicGame] = []
@@ -180,90 +194,7 @@ struct AddEpicGameSheet: View {
                     .disabled(isWorking)
 
                 default:
-                    // ---- Step 1: open the SID URL directly ----
-                    //
-                    // The redirect URL handles BOTH the signed-in
-                    // and signed-out cases natively:
-                    //   * signed in → Epic immediately appends a
-                    //     fresh ?sid=<value> and lands on the store.
-                    //   * signed out → Epic shows its login page,
-                    //     then completes the redirect once the user
-                    //     signs in. Either way, the user ends up on
-                    //     a normal page with the SID in the address
-                    //     bar. No reason to make this a two-step
-                    //     dance for the (much more common) already-
-                    //     signed-in path.
-                    VStack(alignment: .leading, spacing: 6) {
-                        Label("Step 1 — Open the SID URL in your browser",
-                              systemImage: "1.circle.fill")
-                            .font(.callout.weight(.semibold))
-                        Text("Click below. If you're already signed in to Epic, your browser lands on the Epic store with `?sid=…` appended to the address bar. If you aren't signed in, Epic prompts you first, then completes the redirect.")
-                            .font(.callout).foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-
-                        HStack(spacing: 8) {
-                            Button {
-                                epicAuth.openSIDRedirect()
-                            } label: {
-                                Label("Open SID URL", systemImage: "safari")
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(isWorking)
-
-                            Button {
-                                NSPasteboard.general.clearContents()
-                                NSPasteboard.general.setString(
-                                    EpicAuth.sidRedirectURL.absoluteString,
-                                    forType: .string
-                                )
-                            } label: {
-                                Label("Copy URL", systemImage: "doc.on.clipboard")
-                            }
-                            .disabled(isWorking)
-                            .help("Copy the URL if you'd rather paste it into a different browser.")
-                        }
-
-                        // Escape hatch: the rare user who wants to
-                        // switch accounts before grabbing a SID.
-                        // Renders as small secondary text so it
-                        // doesn't compete with the primary button.
-                        Button {
-                            epicAuth.openLoginPage()
-                        } label: {
-                            Text("Need to switch Epic accounts first? Open the login page →")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        .buttonStyle(.link)
-                        .disabled(isWorking)
-                        .padding(.top, 4)
-                    }
-
-                    Divider()
-
-                    // ---- Step 2: paste the resulting URL back in here ----
-                    VStack(alignment: .leading, spacing: 6) {
-                        Label("Step 2 — Paste the resulting URL back here",
-                              systemImage: "2.circle.fill")
-                            .font(.callout.weight(.semibold))
-                        Text("Copy the ENTIRE URL from your browser's address bar after Step 1 lands. It will look like `https://www.epicgames.com/store/en-US/?sid=…`. Carafe extracts the SID automatically.")
-                            .font(.callout).foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-
-                        TextField(
-                            "https://www.epicgames.com/store/en-US/?sid=…",
-                            text: $sidInput,
-                            axis: .vertical
-                        )
-                        .textFieldStyle(.roundedBorder)
-                        .lineLimit(2...4)
-                        .disabled(isWorking)
-
-                        // Live feedback so the user knows whether
-                        // their paste produced a valid SID before
-                        // they click Continue.
-                        sidExtractionHint
-                    }
+                    authIdleOrFallback
                 }
 
                 if let err = errorMessage {
@@ -274,63 +205,150 @@ struct AddEpicGameSheet: View {
         }
     }
 
+    /// Auth view body when the user is NOT yet signed in. Renders
+    /// one of three states based on `authStep`:
+    ///   * `.idle` — single primary "Sign in to Epic" button.
+    ///   * `.attemptingImport` — progress message while
+    ///     `legendary auth --import` is running.
+    ///   * `.manualPaste` — fallback paste field for the
+    ///     authorizationCode after `--import` failed.
+    @ViewBuilder
+    private var authIdleOrFallback: some View {
+        switch authStep {
+        case .idle:
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Sign in once with your Epic account to add owned games into Carafe. Carafe tries to import credentials silently from the local Epic Games Launcher first; if that's not installed you'll be prompted to copy a short code from a browser page.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Button {
+                    Task { await startSignIn() }
+                } label: {
+                    Label("Sign in to Epic", systemImage: "gamecontroller.fill")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(isWorking)
+
+                if EpicAuth.isEpicGamesLauncherInstalled {
+                    Label("Epic Games Launcher detected — sign-in should be one-click via `legendary --import`.",
+                          systemImage: "checkmark.seal.fill")
+                        .font(.caption)
+                        .foregroundStyle(.green)
+                } else {
+                    Label("Epic Games Launcher not detected at /Applications. Carafe will fall back to a code-paste flow after clicking Sign in.",
+                          systemImage: "info.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+        case .attemptingImport:
+            HStack(spacing: 10) {
+                ProgressView().controlSize(.small)
+                Text("Importing credentials from Epic Games Launcher…")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+        case .manualPaste:
+            VStack(alignment: .leading, spacing: 10) {
+                Label("Couldn't import — falling back to manual sign-in",
+                      systemImage: "arrow.right.circle")
+                    .font(.callout.weight(.medium))
+                    .foregroundStyle(.secondary)
+
+                Text("A browser window opened to Epic's login page. Sign in there if needed, then **copy the `authorizationCode` value** from the resulting JSON page (it looks like `{\"authorizationCode\": \"abc123…\"}`). Paste just that code below.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                TextField("authorizationCode", text: $codeInput)
+                    .textFieldStyle(.roundedBorder)
+                    .disabled(isWorking)
+
+                HStack(spacing: 8) {
+                    Button {
+                        epicAuth.openLoginPage()
+                    } label: {
+                        Label("Reopen Login Page", systemImage: "safari")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(isWorking)
+                    Spacer()
+                    Button("Back") {
+                        authStep = .idle
+                        codeInput = ""
+                        errorMessage = nil
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(isWorking)
+                }
+            }
+        }
+    }
+
+    /// Click handler for the primary "Sign in to Epic" button. Tries
+    /// `--import` first; on failure, opens the manual login URL and
+    /// switches to the code-paste UI.
+    private func startSignIn() async {
+        guard !isWorking else { return }
+        isWorking = true
+        defer { isWorking = false }
+        errorMessage = nil
+        authStep = .attemptingImport
+        do {
+            try await epicAuth.attemptImport()
+            // Success path: refreshStatus inside attemptImport
+            // flipped `.status` to .loggedIn. Move to library.
+            if case .loggedIn = epicAuth.status {
+                phase = .library
+                authStep = .idle
+                await loadOwnedGames()
+                return
+            }
+            // attemptImport returned success but status didn't update
+            // — treat as a no-op failure, fall through to manual.
+            authStep = .manualPaste
+            epicAuth.openLoginPage()
+            errorMessage = "Imported credentials but couldn't confirm login. Please complete the manual flow."
+        } catch {
+            // --import failed (usually because Epic Games Launcher
+            // isn't installed). Quietly switch to manual.
+            authStep = .manualPaste
+            epicAuth.openLoginPage()
+        }
+    }
+
+    /// Footer "Continue" handler for the .auth phase.
     private func runAuth() async {
         if case .loggedIn = epicAuth.status {
             phase = .library
             await loadOwnedGames()
             return
         }
-        guard !isWorking else { return }
-        // Pull the SID out of whatever the user pasted (full URL or
-        // bare token). `authButtonDisabled` already gates this, so
-        // extraction normally succeeds — but be defensive in case
-        // they tab past the disabled check.
-        guard let sid = EpicAuth.extractSID(from: sidInput) else {
-            errorMessage = "Couldn't find a SID value in what you pasted. Paste the full URL from your browser's address bar — it should contain `?sid=…`."
+        // In .idle the primary button is the trigger, not Continue.
+        // In .attemptingImport Continue is disabled. In .manualPaste
+        // Continue exchanges the pasted code.
+        guard authStep == .manualPaste else { return }
+        let code = codeInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !code.isEmpty else {
+            errorMessage = "Paste the `authorizationCode` value from the browser page before continuing."
             return
         }
         isWorking = true
         defer { isWorking = false }
         errorMessage = nil
         do {
-            try await epicAuth.completeLogin(sid: sid)
-            sidInput = ""
+            try await epicAuth.completeLogin(code: code)
+            codeInput = ""
+            authStep = .idle
             phase = .library
             await loadOwnedGames()
         } catch {
             errorMessage = error.localizedDescription
-        }
-    }
-
-    /// Live feedback below the SID paste field. Renders one of:
-    ///   * Nothing (empty input)
-    ///   * Green "extracted SID: …" when the parser found one
-    ///   * Orange "couldn't find a SID" hint otherwise
-    @ViewBuilder
-    private var sidExtractionHint: some View {
-        let trimmed = sidInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty {
-            EmptyView()
-        } else if let extracted = EpicAuth.extractSID(from: trimmed) {
-            HStack(spacing: 6) {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-                Text("SID found: ")
-                    .font(.caption).foregroundStyle(.secondary)
-                Text(extracted)
-                    .font(.caption.monospaced())
-                    .textSelection(.enabled)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-        } else {
-            HStack(alignment: .top, spacing: 6) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
-                Text("Couldn't find `sid=…` in that text. Make sure you copied the URL *after* the step-2 redirect lands on the Epic store page.")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
         }
     }
 
@@ -593,10 +611,15 @@ struct AddEpicGameSheet: View {
     private var authButtonDisabled: Bool {
         if isWorking { return true }
         if case .loggedIn = epicAuth.status { return false }
-        // Require a parseable SID before Continue lights up — the
-        // user gets live feedback below the field about whether
-        // their paste worked.
-        return EpicAuth.extractSID(from: sidInput) == nil
+        // Continue is only meaningful in the manual-paste sub-step;
+        // the `.idle` and `.attemptingImport` sub-steps drive
+        // sign-in from the body (or are mid-action). Continue lights
+        // up only once the user has typed something into the code
+        // paste field.
+        if authStep == .manualPaste {
+            return codeInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        return true
     }
 
     // MARK: - Helpers

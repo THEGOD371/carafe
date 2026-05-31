@@ -43,38 +43,29 @@ final class EpicAuth: ObservableObject {
 
     @Published private(set) var status: Status = .notReady
 
-    /// Plain Epic login page — no auto-redirect. We open this first
-    /// so the user signs into their Epic account; after sign-in
-    /// they're on whatever Epic dashboard their account lands on,
-    /// and the page stays open long enough to read.
+    /// Epic OAuth login URL using the canonical `responseType=code`
+    /// flow that legendary's own docs recommend. After the user
+    /// signs in, Epic redirects to a JSON page showing
+    /// `{"authorizationCode": "<value>"}` — a stable page that
+    /// doesn't auto-close, so the user can copy the code at leisure.
     ///
-    /// The user then manually navigates to `sidRedirectURL` (we
-    /// give them a Copy URL button) to get the SID appended to
-    /// their address bar.
+    /// We hand the copied code to `legendary auth --code <value>`
+    /// to complete the exchange.
     nonisolated static let loginURL = URL(string:
-        "https://www.epicgames.com/id/login"
+        "https://www.epicgames.com/id/login?redirectUrl=" +
+        "https%3A%2F%2Fwww.epicgames.com%2Fid%2Fapi%2Fredirect" +
+        "%3FclientId%3D34a02cf8f4414e29b15921876da36f9a" +
+        "%26responseType%3Dcode"
     )!
 
-    /// SID-extraction URL. The user pastes this into the SAME
-    /// browser after signing in via `loginURL`. Epic's redirect API
-    /// observes that the user is authenticated, generates a fresh
-    /// SID for legendary's client ID, and redirects to the
-    /// `redirectUrl` query parameter (the Epic store — a normal
-    /// page that does NOT auto-close) with the SID appended as
-    /// `?sid=<value>`.
-    ///
-    /// The user then copies the FULL final URL from their address
-    /// bar and pastes it into Carafe. `extractSID(from:)` parses
-    /// out the SID.
-    ///
-    /// FRAGILITY: the `clientId` matches legendary's hardcoded
-    /// value. If Epic ever rotates it, legendary's upstream breaks
-    /// first and we follow — bump this constant to match.
-    nonisolated static let sidRedirectURL = URL(string:
-        "https://www.epicgames.com/id/api/redirect" +
-        "?clientId=34a02cf8f4414e29b15921876da36f9a" +
-        "&redirectUrl=https%3A%2F%2Fwww.epicgames.com%2Fstore%2Fen-US%2F"
-    )!
+    /// True if Epic Games Launcher is installed at the canonical
+    /// `/Applications` location. When true, `attemptImport()` is the
+    /// recommended first auth attempt because it's zero-click.
+    nonisolated static var isEpicGamesLauncherInstalled: Bool {
+        FileManager.default.fileExists(
+            atPath: "/Applications/Epic Games Launcher.app"
+        )
+    }
 
     /// Pull the current Epic auth status from legendary. Updates
     /// `status` as a side effect; no return value. Cheap when
@@ -130,72 +121,49 @@ final class EpicAuth: ObservableObject {
         status = .loggedOut
     }
 
-    /// Open the Epic login page in the user's default browser. The
-    /// page does not auto-redirect; after sign-in the user
-    /// separately visits `sidRedirectURL` to obtain the SID.
+    /// Open Epic's `responseType=code` login URL in the default
+    /// browser. After sign-in Epic redirects to a JSON page
+    /// containing `{"authorizationCode": "<value>"}` — the user
+    /// copies that code into the sheet's paste field, which calls
+    /// `completeLogin(code:)`.
     func openLoginPage() {
         NSWorkspace.shared.open(Self.loginURL)
     }
 
-    /// Open `sidRedirectURL` directly. The auth sheet's primary path
-    /// gives the user a Copy URL button (so they paste it manually
-    /// into the same browser session as their login) — this helper
-    /// exists for the convenience case where they want one-click
-    /// access from inside Carafe.
-    func openSIDRedirect() {
-        NSWorkspace.shared.open(Self.sidRedirectURL)
-    }
-
-    /// Pull a SID value out of whatever the user pasted into the
-    /// auth field. Three shapes handled:
-    ///   1. Full URL with `?sid=<value>` query param — what they get
-    ///      from the address bar after `sidRedirectURL` resolves.
-    ///      Extracted via `URLComponents`.
-    ///   2. Bare alphanumeric SID (Epic's tokens are hex-like,
-    ///      32+ chars). Accepted as-is if the input looks like one.
-    ///   3. Anything else → nil. The UI surfaces a "couldn't find
-    ///      a SID" hint and the Continue button stays disabled.
+    /// Try `legendary auth --import`. Reads tokens directly from
+    /// the Epic Games Launcher's local config. Zero user interaction
+    /// when it succeeds — the canonical "easy mode" path.
     ///
-    /// Nonisolated so the sheet's `.disabled(authButtonDisabled)`
-    /// binding can evaluate it on the SwiftUI rendering thread
-    /// without bouncing through the actor.
-    nonisolated static func extractSID(from input: String) -> String? {
-        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-
-        // Shape 1 — URL with sid query param.
-        if let url = URL(string: trimmed),
-           let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-           let sid = components.queryItems?
-                .first(where: { $0.name.lowercased() == "sid" })?.value,
-           !sid.isEmpty
-        {
-            return sid
-        }
-
-        // Shape 2 — bare SID. Epic's tokens are alphanumeric and
-        // long enough that we can heuristically distinguish them
-        // from typed gibberish.
-        if trimmed.count >= 16,
-           trimmed.allSatisfy({ $0.isLetter || $0.isNumber })
-        {
-            return trimmed
-        }
-
-        return nil
+    /// FRAGILITY: legendary's `--import` expects to find Epic Games
+    /// Launcher's encrypted credentials at a path it knows about.
+    /// On macOS the canonical Apple-Silicon-native Launcher (Nov
+    /// 2025+) stores config under
+    /// `~/Library/Application Support/Epic/EpicGamesLauncher/`.
+    /// Older legendary versions only knew the Windows path; if
+    /// import succeeds on a fresh PyPI install we know we're good,
+    /// but if it fails the manual code-paste fallback is what users
+    /// actually rely on.
+    func attemptImport() async throws {
+        _ = try await LegendaryRunner.capture(["auth", "--import"])
+        await refreshStatus()
     }
 
-    /// Hand a SID code from the redirect URL to legendary, which
-    /// exchanges it for refresh tokens and stores them. Throws if
-    /// legendary rejects the code (bad/expired/wrong format).
-    func completeLogin(sid: String) async throws {
-        let trimmed = sid.trimmingCharacters(in: .whitespacesAndNewlines)
+    /// Exchange an Epic authorizationCode (copied from the JSON
+    /// page legendary's loginURL redirects to) for refresh tokens.
+    /// legendary stores the tokens; we just call refreshStatus()
+    /// after.
+    ///
+    /// Modern legendary uses `--code` for authorization codes
+    /// (the JSON-page value) and reserves `--token` for exchange
+    /// tokens. The older `--sid` flag still works in some versions
+    /// but `--code` is what's documented as current.
+    func completeLogin(code: String) async throws {
+        let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             throw Failure.emptyCode
         }
-        // legendary auth --sid <code> exchanges and stores tokens.
         do {
-            _ = try await LegendaryRunner.capture(["auth", "--sid", trimmed])
+            _ = try await LegendaryRunner.capture(["auth", "--code", trimmed])
         } catch let err as LegendaryRunner.Failure {
             switch err {
             case .nonZeroExit(_, let stderr):
