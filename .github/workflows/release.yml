@@ -35,7 +35,12 @@ permissions:
 
 jobs:
   build-and-release:
-    runs-on: macos-14
+    # `macos-latest` so we pick up the newest Xcode GitHub ships.
+    # The build needs to be able to read whatever pbxproj format
+    # `xcodegen` emits, and xcodegen's format tracks current Xcode.
+    # macos-14 was failing v0.1.1: its Xcode 15.4 couldn't read
+    # objectVersion=77 (Xcode 16+) that the brewed xcodegen emits.
+    runs-on: macos-latest
     timeout-minutes: 30
 
     steps:
@@ -44,7 +49,7 @@ jobs:
 
       - name: Read version from tag
         id: version
-        # GITHUB_REF is "refs/tags/v0.1.0"; strip the prefix.
+        # GITHUB_REF is "refs/tags/v0.1.1"; strip the prefix.
         run: |
           tag="${GITHUB_REF#refs/tags/}"
           version="${tag#v}"
@@ -52,11 +57,15 @@ jobs:
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "Building Carafe ${version} from tag ${tag}"
 
-      - name: Select Xcode
-        # macos-14 runners ship with multiple Xcode versions. We
-        # explicitly select a recent stable one so a runner-image
-        # refresh that swaps defaults can't silently break the build.
-        run: sudo xcode-select -s /Applications/Xcode_15.4.app
+      - name: Show runner Xcode
+        # Diagnostic only — surface what we're building against so a
+        # future format mismatch (xcodegen output > runner Xcode) is
+        # obvious in the log instead of buried in a "future format"
+        # error.
+        run: |
+          echo "macOS: $(sw_vers -productVersion)"
+          xcodebuild -version
+          ls /Applications | grep -i xcode || true
 
       - name: Install build tooling
         # xcodegen for the project, create-dmg for packaging.
