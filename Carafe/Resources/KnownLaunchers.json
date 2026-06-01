@@ -1,0 +1,111 @@
+{
+  "schemaVersion": 1,
+  "lastUpdated": "2026-06-01",
+  "_doc": [
+    "Community-maintained database of game launcher quirks Carafe knows about.",
+    "When a user adds a game via GameFormSheet, the picked exe is matched against",
+    "every entry's `match` block; the first hit surfaces a 'we recognise this'",
+    "card with the option to auto-apply the entry's `fix` block into the game's",
+    "compatOverrides.",
+    "",
+    "Confidence levels:",
+    "  high    — Verified working by maintainers or a referenced community tool.",
+    "  medium  — Partial reports; works for some users.",
+    "  pending — Educated guess; needs first-hand verification. The UI shows a",
+    "            warning so users know they're trying an unconfirmed config.",
+    "",
+    "To add a new entry, copy an existing block, update the match + fix data,",
+    "and open a PR. See Report Compatibility button in the app for the issue",
+    "template path.",
+    "",
+    "FRAGILITY: exe filenames are matched case-insensitively against the picked",
+    "URL's lastPathComponent. Folder hints scan all path components (also case-",
+    "insensitive). False positives are possible if a folder name like 'launcher'",
+    "is too generic — keep hints specific (publisher + product, not bare 'launcher')."
+  ],
+  "launchers": [
+    {
+      "id": "where-winds-meet",
+      "displayName": "Where Winds Meet",
+      "publisher": "NetEase / Everstone Studio",
+      "match": {
+        "exeNames": [
+          "wherewindsmeetlauncher.exe",
+          "wwm_launcher.exe",
+          "wwmlauncher.exe",
+          "where winds meet launcher.exe"
+        ],
+        "folderHints": ["where winds meet", "wherewindsmeet", "wwm"]
+      },
+      "fix": {
+        "skipLauncherTo": null,
+        "windowsVersion": "win10",
+        "graphicsBackend": "dxvk",
+        "winetricksVerbs": ["vcrun2022", "dxvk"],
+        "dllOverrides": {
+          "libglesv2": "disabled",
+          "dcomp": "disabled"
+        },
+        "environment": {
+          "WINE_LARGE_ADDRESS_AWARE": "1"
+        },
+        "notes": "Where Winds Meet's launcher uses an Electron/CEF stack similar to Steam's web helper; the same DLL overrides that fix Steam (libglesv2 + dcomp disabled) are a plausible starting point. UE5 game → DXVK preferred over D3DMetal. Currently UNVERIFIED on macOS — community confirmation needed.",
+        "confidence": "pending",
+        "lastVerified": null
+      }
+    },
+    {
+      "id": "hoyoverse-launcher",
+      "displayName": "Hoyoverse Launcher",
+      "publisher": "HoYoverse / miHoYo",
+      "match": {
+        "exeNames": ["launcher.exe"],
+        "folderHints": [
+          "genshinimpact",
+          "genshin impact game",
+          "starrail",
+          "honkai",
+          "hoyoplay",
+          "miHoYoLauncher"
+        ]
+      },
+      "fix": {
+        "skipLauncherTo": "GenshinImpact.exe",
+        "windowsVersion": "win10",
+        "graphicsBackend": "dxvk",
+        "winetricksVerbs": ["vcrun2022", "dxvk"],
+        "dllOverrides": null,
+        "environment": null,
+        "notes": "Hoyoverse's launcher uses an embedded WebKit that crashes under Wine on macOS. The YAAGL community proves direct game-exe launch works for the single-player path. Anti-cheat (mhyprot2) won't load — multiplayer modes will be blocked. If installing this game, point Carafe at GenshinImpact.exe (or StarRail.exe / honkai equivalent) inside Game/Game_Data/.",
+        "confidence": "high",
+        "lastVerified": "2026-04-01"
+      }
+    },
+    {
+      "id": "battlenet-launcher",
+      "displayName": "Battle.net",
+      "publisher": "Blizzard Entertainment",
+      "match": {
+        "exeNames": [
+          "battle.net launcher.exe",
+          "battle.net.exe",
+          "agent.exe"
+        ],
+        "folderHints": ["battle.net", "blizzard"]
+      },
+      "fix": {
+        "skipLauncherTo": null,
+        "windowsVersion": "win10",
+        "graphicsBackend": "dxvk",
+        "winetricksVerbs": ["vcrun2022", "vcrun2019"],
+        "dllOverrides": {
+          "browsercrashhandler.exe": "disabled"
+        },
+        "environment": null,
+        "notes": "Battle.net runs under Wine 8+ on macOS once you've installed the VC++ runtimes and disabled the crash handler (which itself crashes a lot). Many Blizzard games launch through it cleanly; games gated behind kernel-level anti-cheat (Diablo IV's Warden integration, Overwatch 2's tournament mode) won't work.",
+        "confidence": "high",
+        "lastVerified": "2026-03-15"
+      }
+    }
+  ]
+}

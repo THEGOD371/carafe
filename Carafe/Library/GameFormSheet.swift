@@ -31,6 +31,22 @@ struct GameFormSheet: View {
     @State private var coverArtFilename: String?
     @State private var inlineError: String?
 
+    /// Recognised launcher profile, if the picked exe matched an
+    /// entry in KnownLaunchers.json. Updated on every change to
+    /// `exeURL`.
+    @State private var detectedLauncher: LauncherProfile?
+
+    /// Compat overrides queued for application to the game when the
+    /// form submits. Non-nil only after the user clicks Apply in
+    /// the recognise-card. nil = no auto-apply happened (or the
+    /// user chose Dismiss).
+    @State private var pendingCompatOverrides: GameCompatOverrides?
+
+    /// True once the user has chosen to dismiss the recognise-card
+    /// for the current detection. Prevents the card from re-
+    /// appearing on every re-render after dismissal.
+    @State private var dismissedDetection: Bool = false
+
     @State private var showingCoverPicker = false
 
     // MARK: - Body
@@ -45,6 +61,7 @@ struct GameFormSheet: View {
                     nameRow
                     bottleRow
                     exeRow
+                    knownLauncherCard
                     argsRow
                     if let inlineError {
                         Label(inlineError, systemImage: "exclamationmark.triangle.fill")
@@ -165,6 +182,168 @@ struct GameFormSheet: View {
             .pickerStyle(.menu)
             Text("The exe runs inside this bottle's Wine prefix.")
                 .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: - Known launcher recognition card
+
+    /// Renders the "we recognise this launcher" card when:
+    ///   * the picked exe matched a KnownLaunchers.json profile, AND
+    ///   * the user hasn't dismissed the card for the current detection.
+    /// Hidden when nothing was detected or when fixes are already
+    /// applied (in which case we show a smaller "applied" status).
+    @ViewBuilder
+    private var knownLauncherCard: some View {
+        if let profile = detectedLauncher, !dismissedDetection {
+            if pendingCompatOverrides != nil {
+                // Compact confirmation row after the user applied.
+                Label(
+                    "Compatibility fixes for \(profile.displayName) will be saved with the game.",
+                    systemImage: "checkmark.seal.fill"
+                )
+                .font(.callout)
+                .foregroundStyle(.green)
+                .padding(10)
+                .background(Color.green.opacity(0.10))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            } else {
+                detectionPrompt(profile: profile)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func detectionPrompt(profile: LauncherProfile) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "lightbulb.fill")
+                    .foregroundStyle(.tint)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Looks like **\(profile.displayName)**'s launcher.")
+                        .font(.callout.weight(.medium))
+                    if let publisher = profile.publisher {
+                        Text(publisher).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+                confidenceBadge(for: profile.fix.confidence)
+            }
+
+            if !profile.appliedFixSummary.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Carafe can auto-apply:")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                    ForEach(profile.appliedFixSummary, id: \.self) { line in
+                        Text("• \(line)").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.top, 2)
+            }
+
+            if let verbs = profile.fix.winetricksVerbs, !verbs.isEmpty {
+                Text("Recommended winetricks verbs to install via the bottle's Components sheet: **\(verbs.joined(separator: ", "))**.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if let skipTo = profile.fix.skipLauncherTo {
+                Text("Tip: the launcher tends to crash under Wine. The actual game exe is usually at `\(skipTo)` — point Carafe there instead and skip the launcher.")
+                    .font(.caption).foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if let notes = profile.fix.notes, !notes.isEmpty {
+                Text(notes)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HStack(spacing: 8) {
+                Button {
+                    applyKnownFix(profile)
+                } label: {
+                    Label("Apply known fixes", systemImage: "wand.and.stars")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(profile.asCompatOverrides() == nil)
+
+                Button("Dismiss") {
+                    dismissedDetection = true
+                }
+
+                Spacer()
+
+                Button {
+                    openReportCompatibility(for: profile)
+                } label: {
+                    Label("Report", systemImage: "bubble.left.and.text.bubble.right")
+                        .labelStyle(.titleAndIcon)
+                        .font(.caption)
+                }
+                .buttonStyle(.borderless)
+                .help("Open a GitHub issue to share your working config with the community")
+            }
+        }
+        .padding(12)
+        .background(Color(NSColor.controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(Color.accentColor.opacity(0.3), lineWidth: 1)
+        )
+    }
+
+    @ViewBuilder
+    private func confidenceBadge(for confidence: LauncherProfile.Confidence?) -> some View {
+        switch confidence {
+        case .high:
+            Label("verified", systemImage: "checkmark.seal.fill")
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.green)
+        case .medium:
+            Label("partial", systemImage: "minus.circle.fill")
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.orange)
+        case .pending, .none:
+            Label("unverified", systemImage: "questionmark.circle.fill")
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.orange)
+        }
+    }
+
+    private func applyKnownFix(_ profile: LauncherProfile) {
+        guard let overrides = profile.asCompatOverrides() else { return }
+        pendingCompatOverrides = overrides
+    }
+
+    /// Open a GitHub new-issue form with prefilled body for the
+    /// user to confirm / refine the fix. Doesn't require any
+    /// authentication — GitHub opens the form in the user's browser.
+    private func openReportCompatibility(for profile: LauncherProfile) {
+        let title = "Launcher compat report: \(profile.displayName)"
+        let bottle = selectedBottle?.name ?? "—"
+        let wineBuild = selectedBottle?.wineBuild.shortName ?? "—"
+        let body = """
+        **Game / Launcher:** \(profile.displayName) (`\(profile.id)`)
+        **Bottle:** \(bottle)
+        **Wine build:** \(wineBuild)
+        **Exe path:** `\(exeURL?.path ?? "—")`
+
+        **Worked / didn't work:** [fill in]
+
+        **Notes:**
+        - [What you tried, what fixed it, any extra Winetricks verbs you needed]
+        """
+        var components = URLComponents(string: "https://github.com/THEGOD371/carafe/issues/new")!
+        components.queryItems = [
+            URLQueryItem(name: "title", value: title),
+            URLQueryItem(name: "body", value: body),
+            URLQueryItem(name: "labels", value: "launcher-fix"),
+        ]
+        if let url = components.url {
+            NSWorkspace.shared.open(url)
         }
     }
 
@@ -304,6 +483,15 @@ struct GameFormSheet: View {
             if let bottle = library.bottle(for: game) {
                 exeURL = game.exePath.resolve(bottle: bottle)
             }
+            // If this game already has compat overrides, treat the
+            // detection as "already addressed" — we still detect for
+            // display info but don't re-prompt to apply.
+            if let url = exeURL {
+                detectedLauncher = KnownLaunchers.match(exeURL: url)
+            }
+            if game.compatOverrides != nil {
+                dismissedDetection = true
+            }
         }
     }
 
@@ -370,6 +558,12 @@ struct GameFormSheet: View {
         if mode == .add, name.isEmpty {
             name = GameLibrary.suggestedName(for: url)
         }
+        // Run the KnownLaunchers matcher on the fresh pick. We reset
+        // `dismissedDetection` so a new exe pick gets its own chance
+        // to surface even if the user dismissed a previous one.
+        detectedLauncher = KnownLaunchers.match(exeURL: url)
+        pendingCompatOverrides = nil
+        dismissedDetection = false
     }
 
     private func submit() {
@@ -385,11 +579,12 @@ struct GameFormSheet: View {
                 inlineError = library.lastError ?? "Couldn't add game."
                 return
             }
-            // Persist cover art selection if the user chose one
-            // before saving.
-            if let filename = coverArtFilename {
+            // Persist cover art + any queued KnownLaunchers compat
+            // overrides if the user chose them before saving.
+            if coverArtFilename != nil || pendingCompatOverrides != nil {
                 var updated = new
-                updated.coverArtFilename = filename
+                if let filename = coverArtFilename { updated.coverArtFilename = filename }
+                if let overrides = pendingCompatOverrides { updated.compatOverrides = overrides }
                 library.update(updated)
             }
             dismiss()
@@ -402,6 +597,13 @@ struct GameFormSheet: View {
             updated.exePath = .from(exeURL: exeURL, bottle: bottle)
             updated.arguments = parsedArguments
             updated.coverArtFilename = coverArtFilename
+            // Auto-apply a fresh KnownLaunchers detection if the user
+            // clicked Apply in the card. Doesn't clobber existing
+            // overrides set elsewhere (CompatConfigSheet) unless the
+            // user explicitly re-applied.
+            if let overrides = pendingCompatOverrides {
+                updated.compatOverrides = overrides
+            }
             library.update(updated)
             dismiss()
         }
