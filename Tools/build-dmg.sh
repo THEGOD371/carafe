@@ -57,7 +57,7 @@ set -euo pipefail
 
 # ---- Configuration ----
 
-VERSION="${CARAFE_VERSION:-0.1.1}"
+VERSION="${CARAFE_VERSION:-0.1.2}"
 APP_NAME="Carafe"
 DMG_NAME="${APP_NAME}-${VERSION}.dmg"
 VOLUME_NAME="${APP_NAME} ${VERSION}"
@@ -88,7 +88,7 @@ echo "✓ create-dmg: $(command -v create-dmg)"
 # ---- 2. Background image ----
 
 echo "→ Generating DMG background…"
-( cd "${REPO_ROOT}" && swift Tools/generate-dmg-background.swift )
+( cd "${REPO_ROOT}" && CARAFE_VERSION="${VERSION}" swift Tools/generate-dmg-background.swift )
 if [[ ! -f "${BACKGROUND}" ]]; then
     echo "✗ Background image was not produced at ${BACKGROUND}" >&2
     exit 1
@@ -131,6 +131,7 @@ xcodebuild \
     CODE_SIGN_IDENTITY="" \
     CODE_SIGNING_REQUIRED=NO \
     CODE_SIGNING_ALLOWED=NO \
+    ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES=NO \
     build \
     | tail -20
 
