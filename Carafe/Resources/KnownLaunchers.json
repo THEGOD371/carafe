@@ -25,6 +25,33 @@
   ],
   "launchers": [
     {
+      "id": "steam-client",
+      "displayName": "Steam",
+      "publisher": "Valve",
+      "match": {
+        "exeNames": ["steam.exe"],
+        "folderHints": ["steam"]
+      },
+      "fix": {
+        "skipLauncherTo": null,
+        "windowsVersion": "win10",
+        "graphicsBackend": "dxmt",
+        "winetricksVerbs": ["vcrun2022"],
+        "dllOverrides": {
+          "libglesv2": "disabled",
+          "dcomp": "disabled"
+        },
+        "environment": {
+          "WEBKIT_DISABLE_COMPOSITING_MODE": "1",
+          "METAL_DEVICE_WRAPPER_TYPE": "1"
+        },
+        "preserveWineserverOnExit": true,
+        "notes": "Steam's updater exits after printing `Update complete, launching Steam...` and may hand off to a child process in the same Wine prefix. Carafe preserves wineserver on natural Steam exits so that child is not killed immediately. Wine Staging is strongly recommended; GPTK's Wine 7.7 path is degraded.",
+        "confidence": "medium",
+        "lastVerified": "2026-06-02"
+      }
+    },
+    {
       "id": "where-winds-meet",
       "displayName": "Where Winds Meet",
       "publisher": "NetEase / Everstone Studio",

@@ -90,6 +90,7 @@ final class RunSession: ObservableObject, Identifiable {
     private var didFireSessionEnded = false
     private var emittedLauncherDiagnostics = Set<String>()
     private var didRunPostExitHandoff = false
+    private var isSteamLaunch = false
     private let logCap = 5_000
 
     init(bottle: Bottle, exeURL: URL, config: ResolvedConfig) {
@@ -151,8 +152,19 @@ final class RunSession: ObservableObject, Identifiable {
         )
         let cwd = exeURL.deletingLastPathComponent()
         appendLog("Working directory: \(cwd.path)", stream: .info)
-        if !arguments.isEmpty {
-            appendLog("Arguments: \(arguments.joined(separator: " "))", stream: .info)
+        isSteamLaunch = SteamInstaller.isSteamExecutable(exeURL)
+        let launchArguments = isSteamLaunch
+            ? SteamInstaller.augmentedLaunchArguments(arguments, for: bottle.wineBuild)
+            : arguments
+
+        if !launchArguments.isEmpty {
+            appendLog("Arguments: \(launchArguments.joined(separator: " "))", stream: .info)
+        }
+        if isSteamLaunch {
+            appendLog(
+                "Steam launch detected — applying Steam UI/update handoff workarounds.",
+                stream: .info
+            )
         }
         appendLog(
             "Config: \(config.graphicsBackend.displayName), \(config.sync.displayName), Windows \(config.windowsVersion.displayName)\(config.metalHUD ? ", Metal HUD on" : "")\(config.retina ? ", Retina" : "")",
@@ -263,7 +275,7 @@ final class RunSession: ObservableObject, Identifiable {
         // brew symlink at /opt/homebrew/bin/wine64; for Wine Staging
         // it's inside our app-support tree.
         proc.executableURL = URL(fileURLWithPath: WineRunner.wine64Path(for: bottle.wineBuild))
-        proc.arguments = [exeURL.path] + arguments
+        proc.arguments = [exeURL.path] + launchArguments
         proc.currentDirectoryURL = cwd
         proc.environment = buildEnvironment()
 
@@ -379,6 +391,9 @@ final class RunSession: ObservableObject, Identifiable {
             extra: config.derivedEnvironment
         )
         for (k, v) in wineEnv { base[k] = v }
+        if SteamInstaller.isSteamExecutable(exeURL) {
+            SteamInstaller.applySteamLaunchEnvironment(to: &base, bottle: bottle)
+        }
         return base
     }
 
@@ -576,9 +591,9 @@ final class RunSession: ObservableObject, Identifiable {
     }
 
     private var shouldPreserveWineserverAfterNaturalExit: Bool {
-        guard !userInitiatedStop,
-              let profile = KnownLaunchers.match(exeURL: exeURL)
-        else { return false }
+        if userInitiatedStop { return false }
+        if isSteamLaunch { return true }
+        guard let profile = KnownLaunchers.match(exeURL: exeURL) else { return false }
         return profile.fix.preserveWineserverOnExit == true
     }
 }

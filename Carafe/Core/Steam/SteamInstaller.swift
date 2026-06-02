@@ -333,6 +333,44 @@ enum SteamInstaller {
         }
     }
 
+    static func isSteamExecutable(_ url: URL) -> Bool {
+        url.lastPathComponent.caseInsensitiveCompare("steam.exe") == .orderedSame
+    }
+
+    /// Add Steam's Wine/macOS compatibility flags without duplicating
+    /// flags the library entry already stores, e.g. `-applaunch 1245620`.
+    static func augmentedLaunchArguments(
+        _ existing: [String],
+        for build: WineBuild
+    ) -> [String] {
+        var result = existing
+        let present = Set(existing.map { $0.lowercased() })
+        for flag in steamLaunchFlags(for: build) where !present.contains(flag.lowercased()) {
+            result.append(flag)
+        }
+        return result
+    }
+
+    /// Runtime Steam environment shared by both the dedicated
+    /// "Launch Steam" button and generic library `RunSession`s that
+    /// point at Steam.exe. This keeps Steam tiles and `-applaunch`
+    /// entries from accidentally bypassing the CEF black-window fixes.
+    static func applySteamLaunchEnvironment(to env: inout [String: String], bottle: Bottle) {
+        env["WEBKIT_DISABLE_COMPOSITING_MODE"] = "1"
+        env["WINEDLLOVERRIDES"] = "libglesv2=disabled;dcomp=disabled"
+        env["METAL_DEVICE_WRAPPER_TYPE"] = "1"
+
+        if bottle.wineBuild == .gptk {
+            // Legacy fallback only. On Wine Staging this breaks the
+            // current Steam client because the modern UI is CEF.
+            env["STEAM_DISABLE_BROWSER"] = "1"
+        } else {
+            // Clean up stale env from older Carafe builds or user
+            // experiments. Wine Staging needs Steam's browser UI.
+            env.removeValue(forKey: "STEAM_DISABLE_BROWSER")
+        }
+    }
+
     /// Convenience: launch Steam GUI inside a bottle (non-blocking).
     /// Used by the post-install "Launch Steam to sign in" button.
     /// We don't track this as a RunSession because Steam's lifetime
@@ -400,18 +438,12 @@ enum SteamInstaller {
         // disabling alone isn't enough on a given combo of macOS
         // + Wine + Steam client version.
         //
-        // bottle.environment is applied AFTER these so a power
-        // user can override WINEDLLOVERRIDES if needed.
-        env["WINEDLLOVERRIDES"] = "libglesv2=disabled;dcomp=disabled"
-        env["METAL_DEVICE_WRAPPER_TYPE"] = "1"
-
-        if bottle.wineBuild == .gptk {
-            // Legacy fallback only. On Wine Staging this breaks the
-            // current Steam client because the modern UI is CEF.
-            env["STEAM_DISABLE_BROWSER"] = "1"
-        }
-
+        // Apply bottle.environment first, then force the Steam
+        // overrides. Older Carafe builds and manual experiments may
+        // have left STEAM_DISABLE_BROWSER=1 in the bottle; Wine
+        // Staging must clear that or Steam's modern UI cannot draw.
         for (k, v) in bottle.environment { env[k] = v }
+        applySteamLaunchEnvironment(to: &env, bottle: bottle)
         process.environment = env
 
         process.standardOutput = FileHandle.nullDevice
