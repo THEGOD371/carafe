@@ -91,6 +91,7 @@ final class RunSession: ObservableObject, Identifiable {
     private var emittedLauncherDiagnostics = Set<String>()
     private var didRunPostExitHandoff = false
     private var isSteamLaunch = false
+    private var didPreserveWineserverAfterExit = false
     private let logCap = 5_000
 
     init(bottle: Bottle, exeURL: URL, config: ResolvedConfig) {
@@ -170,6 +171,18 @@ final class RunSession: ObservableObject, Identifiable {
             "Config: \(config.graphicsBackend.displayName), \(config.sync.displayName), Windows \(config.windowsVersion.displayName)\(config.metalHUD ? ", Metal HUD on" : "")\(config.retina ? ", Retina" : "")",
             stream: .info
         )
+
+        if isSteamLaunch {
+            // Steam's updater/CEF children can survive after the
+            // wrapper process exits. Starting a new Steam instance
+            // with stale webhelpers alive leads to singleton-lock
+            // warnings and half-created/black UI windows. Clear the
+            // prefix before a deliberate Steam launch; if Steam is
+            // already running, the user is effectively asking Carafe
+            // to restart it cleanly.
+            appendLog("Cleaning up stale Steam helper processes before launch…", stream: .info)
+            await WineRunner.shutdownSteamProcesses(prefix: bottle.prefixURL, build: bottle.wineBuild)
+        }
 
         let launcherProfile = KnownLaunchers.match(exeURL: exeURL)
 
@@ -379,22 +392,29 @@ final class RunSession: ObservableObject, Identifiable {
             // the actual work lives in wineserver children. Kill the
             // server outright.
             appendLog("Process didn't exit on SIGTERM — killing wineserver for this prefix.", stream: .info)
-            await WineRunner.shutdownWineserver(prefix: bottle.prefixURL, build: bottle.wineBuild)
+            if isSteamLaunch {
+                await WineRunner.shutdownSteamProcesses(prefix: bottle.prefixURL, build: bottle.wineBuild)
+            } else {
+                await WineRunner.shutdownWineserver(prefix: bottle.prefixURL, build: bottle.wineBuild)
+            }
         }
     }
 
-    /// Sweep any leftover wineserver in this prefix. Called from
-    /// the UI after a terminal state so re-launches start cold.
-    /// Idempotent.
+    /// Sweep any leftover wineserver in this prefix. Called from the
+    /// UI after a terminal state so re-launches start cold. Idempotent.
     func cleanup() async {
-        if shouldPreserveWineserverAfterNaturalExit {
+        if didPreserveWineserverAfterExit {
             appendLog(
-                "Leaving wineserver running because this launcher may have handed off to an updater/downloader.",
+                "Leaving wineserver running because this launch handed off to an updater/downloader.",
                 stream: .info
             )
             return
         }
-        await WineRunner.shutdownWineserver(prefix: bottle.prefixURL, build: bottle.wineBuild)
+        if isSteamLaunch {
+            await WineRunner.shutdownSteamProcesses(prefix: bottle.prefixURL, build: bottle.wineBuild)
+        } else {
+            await WineRunner.shutdownWineserver(prefix: bottle.prefixURL, build: bottle.wineBuild)
+        }
     }
 
     func clearLog() { logLines.removeAll() }
@@ -477,15 +497,27 @@ final class RunSession: ObservableObject, Identifiable {
         // Known-launcher exception: WWM exits after logging
         // `StartUpdateExe success`, handing off to updater.exe in
         // the same prefix. Killing wineserver here kills that child
-        // before it can download the game. Profiles opt into this
-        // preserve behavior with `preserveWineserverOnExit`.
-        if shouldPreserveWineserverAfterNaturalExit {
+        // before it can download the game. Steam is more specific:
+        // its updater exits with code 42 after logging
+        // "Update complete, launching Steam...". Preserving every
+        // normal Steam exit leaves stale steamwebhelper processes
+        // and singleton locks, which causes the next UI launch to
+        // behave unpredictably.
+        if shouldPreserveWineserverAfterNaturalExit(exitCode: exitCode, profile: profile) {
+            didPreserveWineserverAfterExit = true
             appendLog(
                 "Launcher exited; preserving wineserver so any updater/download process can continue.",
                 stream: .info
             )
         } else {
-            Task { await WineRunner.shutdownWineserver(prefix: bottle.prefixURL, build: bottle.wineBuild) }
+            didPreserveWineserverAfterExit = false
+            Task {
+                if isSteamLaunch {
+                    await WineRunner.shutdownSteamProcesses(prefix: bottle.prefixURL, build: bottle.wineBuild)
+                } else {
+                    await WineRunner.shutdownWineserver(prefix: bottle.prefixURL, build: bottle.wineBuild)
+                }
+            }
         }
     }
 
@@ -612,10 +644,20 @@ final class RunSession: ObservableObject, Identifiable {
         }
     }
 
-    private var shouldPreserveWineserverAfterNaturalExit: Bool {
+    private func shouldPreserveWineserverAfterNaturalExit(
+        exitCode: Int32,
+        profile: LauncherProfile?
+    ) -> Bool {
         if userInitiatedStop { return false }
-        if isSteamLaunch { return true }
-        guard let profile = KnownLaunchers.match(exeURL: exeURL) else { return false }
+        if isSteamLaunch {
+            // Steam updater handoff. Observed in logs:
+            // "Update complete, launching Steam..." followed by
+            // process exit 42. That child needs wineserver to live.
+            // Normal Steam exits must not preserve it or stale CEF
+            // helpers accumulate across launches.
+            return exitCode == 42
+        }
+        guard let profile else { return false }
         return profile.fix.preserveWineserverOnExit == true
     }
 }

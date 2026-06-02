@@ -230,4 +230,26 @@ enum WineRunner {
             environment: environment(for: prefix, build: build)
         )
     }
+
+    /// Stop Steam-specific Wine processes in a prefix, then sweep the
+    /// wineserver. Steam can leave detached CEF/service children alive
+    /// after the wrapper `Steam.exe` exits; those children hold singleton
+    /// locks and make the next launch open to a broken/blank UI. Running
+    /// Wine's own `taskkill` keeps this scoped to the target prefix.
+    ///
+    /// FRAGILITY: Steam process names are stable today
+    /// (`Steam.exe`, `steamwebhelper.exe`, `steamservice.exe`), but Valve
+    /// can rename helper binaries. If a future log shows new stale Steam
+    /// children, add them here before falling back to broad macOS `pkill`.
+    static func shutdownSteamProcesses(prefix: URL, build: WineBuild = .gptk) async {
+        let targets = ["Steam.exe", "steamwebhelper.exe", "steamservice.exe"]
+        for target in targets {
+            _ = try? await ShellRunner.runToCompletion(
+                wine64Path(for: build),
+                arguments: ["taskkill", "/F", "/IM", target],
+                environment: environment(for: prefix, build: build)
+            )
+        }
+        await shutdownWineserver(prefix: prefix, build: build)
+    }
 }
