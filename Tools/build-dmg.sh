@@ -58,7 +58,7 @@ set -euo pipefail
 
 # ---- Configuration ----
 
-VERSION="${CARAFE_VERSION:-0.1.3}"
+VERSION="${CARAFE_VERSION:-0.1.4}"
 APP_NAME="Carafe"
 DMG_NAME="${APP_NAME}-${VERSION}.dmg"
 VOLUME_NAME="${APP_NAME} ${VERSION}"

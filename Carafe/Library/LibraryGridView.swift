@@ -9,6 +9,7 @@ struct LibraryGridView: View {
     @EnvironmentObject private var heroicScanner: HeroicScanner
 
     @State private var showingAdd = false
+    @State private var showingCreateBottle = false
     @State private var editingGame: Game?
     @State private var launchingGame: Game?
     @State private var deleteCandidate: Game?
@@ -61,6 +62,9 @@ struct LibraryGridView: View {
         .toolbar { toolbar }
         .sheet(isPresented: $showingAdd) {
             GameFormSheet(mode: .add)
+        }
+        .sheet(isPresented: $showingCreateBottle) {
+            CreateBottleSheet()
         }
         .sheet(item: $editingGame) { game in
             GameFormSheet(mode: .edit(game))
@@ -219,7 +223,7 @@ struct LibraryGridView: View {
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: 460)
                 if bottles.entries.compactMap(\.validBottle).isEmpty {
-                    Text("You'll need at least one bottle first — switch to the Bottles tab in the sidebar.")
+                    Text("You'll need at least one bottle first.")
                         .multilineTextAlignment(.center)
                         .font(.callout)
                         .foregroundStyle(.orange)
@@ -227,16 +231,29 @@ struct LibraryGridView: View {
                         .padding(.top, 6)
                 }
             }
-            Button {
-                showingAdd = true
-            } label: {
-                Label("Add your first game", systemImage: "plus")
-                    .frame(minWidth: 220)
+            if bottles.entries.compactMap(\.validBottle).isEmpty {
+                Button {
+                    showingCreateBottle = true
+                } label: {
+                    Label("Create your first bottle", systemImage: "plus")
+                        .frame(minWidth: 220)
+                }
+                .controlSize(.large)
+                .buttonStyle(.borderedProminent)
+                .padding(.top, 12)
+                .disabled(!WineRunner.isWineAvailable)
+            } else {
+                Button {
+                    showingAdd = true
+                } label: {
+                    Label("Add your first game", systemImage: "plus")
+                        .frame(minWidth: 220)
+                }
+                .controlSize(.large)
+                .buttonStyle(.borderedProminent)
+                .padding(.top, 12)
+                .disabled(!WineRunner.isWineAvailable)
             }
-            .controlSize(.large)
-            .buttonStyle(.borderedProminent)
-            .padding(.top, 12)
-            .disabled(bottles.entries.compactMap(\.validBottle).isEmpty || !WineRunner.isWineAvailable)
 
             // Suggest Heroic when it isn't installed. Hidden once the
             // scanner detects a Heroic config — at that point the

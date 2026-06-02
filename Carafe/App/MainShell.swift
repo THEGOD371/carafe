@@ -9,6 +9,7 @@ struct MainShell: View {
     @Environment(\.openSettings) private var openSettings
 
     @State private var section: Section = .library
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
     enum Section: String, CaseIterable, Hashable, Identifiable {
         case library = "Library"
@@ -24,7 +25,7 @@ struct MainShell: View {
     }
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
             List(Section.allCases, selection: $section) { item in
                 Label(item.rawValue, systemImage: item.icon)
                     .tag(item)
@@ -32,10 +33,20 @@ struct MainShell: View {
             .listStyle(.sidebar)
             .navigationTitle("Carafe")
             .frame(minWidth: 160, idealWidth: 180)
-            .toolbar(removing: .sidebarToggle)
         } detail: {
             detailView
                 .toolbar {
+                    ToolbarItem(placement: .navigation) {
+                        Picker("Section", selection: $section) {
+                            ForEach(Section.allCases) { item in
+                                Label(item.rawValue, systemImage: item.icon)
+                                    .tag(item)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .frame(width: 230)
+                        .help("Switch between Library and Bottles")
+                    }
                     ToolbarItem(placement: .automatic) {
                         Button {
                             openSettings()

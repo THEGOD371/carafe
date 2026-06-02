@@ -42,7 +42,7 @@ import AppKit
 import CoreGraphics
 import Foundation
 
-let carafeVersion = ProcessInfo.processInfo.environment["CARAFE_VERSION"] ?? "0.1.3"
+let carafeVersion = ProcessInfo.processInfo.environment["CARAFE_VERSION"] ?? "0.1.4"
 import ImageIO
 import UniformTypeIdentifiers
 

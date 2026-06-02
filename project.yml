@@ -103,8 +103,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.carafe.Carafe
         PRODUCT_NAME: Carafe
-        MARKETING_VERSION: "0.1.3"
-        CURRENT_PROJECT_VERSION: "4"
+        MARKETING_VERSION: "0.1.4"
+        CURRENT_PROJECT_VERSION: "5"
         CODE_SIGN_ENTITLEMENTS: Carafe/App/Carafe.entitlements
         ENABLE_PREVIEWS: YES
         SWIFT_EMIT_LOC_STRINGS: YES

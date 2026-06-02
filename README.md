@@ -5,7 +5,7 @@
 > source (MIT).
 
 <!--
-  TODO before tagging v0.1.3:
+  TODO before tagging v0.1.4:
   Drop a hero screenshot in docs/screenshots/library.png and uncomment
   the line below. Recommended: the library grid with a few games
   installed, taken at 2× retina, 1600×1000 region.
@@ -26,7 +26,7 @@ handles the Wine glue so you don't have to.
 ## Download
 
 <!--
-  TODO before tagging v0.1.3:
+  TODO before tagging v0.1.4:
   Replace the URL below with the real GitHub Releases link.
   Generated automatically by the release workflow once the
   `THEGOD371/carafe` placeholder in `project.yml` (SUFeedURL) and
@@ -34,7 +34,7 @@ handles the Wine glue so you don't have to.
   with the real repo slug.
 -->
 
-**[Download Carafe 0.1.3 (.dmg)](https://github.com/THEGOD371/carafe/releases/latest)**
+**[Download Carafe 0.1.4 (.dmg)](https://github.com/THEGOD371/carafe/releases/latest)**
 
 ## First-launch — Gatekeeper bypass
 
@@ -122,7 +122,7 @@ Then build & run the `Carafe` scheme.
 
 ```bash
 ./Tools/build-dmg.sh
-# → Carafe-0.1.3.dmg in the repo root
+# → Carafe-0.1.4.dmg in the repo root
 ```
 
 The script auto-installs `create-dmg` via Homebrew on first run,
@@ -149,7 +149,7 @@ TESTING.md A-bis for the gory details).
 Releases are cut by pushing a `v*` tag:
 
 ```bash
-git tag v0.1.3
+git tag v0.1.4
 git push --tags
 ```
 
