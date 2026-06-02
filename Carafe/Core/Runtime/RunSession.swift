@@ -244,6 +244,28 @@ final class RunSession: ObservableObject, Identifiable {
             }
         }
 
+        // --- Repair Steam's helper DLLs ---
+        //
+        // Steam can update into a state where `Steam/bin/` contains
+        // gldriverquery.exe but no SDL2.dll. Wine then emits a noisy
+        // loader failure and Steam's UI may never finish drawing.
+        // Fix it before launch so old Steam tiles get repaired
+        // automatically.
+        if isSteamLaunch {
+            do {
+                try await SteamInstaller.ensureSteamSupportDLLs(in: bottle) { [weak self] line in
+                    Task { @MainActor [weak self] in
+                        self?.appendLog(line, stream: .info)
+                    }
+                }
+            } catch {
+                appendLog(
+                    "⚠️ Steam support DLL repair failed: \(error.localizedDescription)",
+                    stream: .info
+                )
+            }
+        }
+
         // --- Apply Windows version override (if any) ---
         //
         // We always write the resolved Windows version to the

@@ -110,6 +110,29 @@ enum SteamInstaller {
         string: "https://cdn.cloudflare.steamstatic.com/client/installer/SteamSetup.exe"
     )!
 
+    /// Steam's current Windows client can still spawn the old
+    /// `bin/gldriverquery.exe` helper, which imports SDL2.dll.
+    /// Current Steam packages may only ship SDL3.dll, leaving Wine
+    /// to fail with:
+    ///
+    ///     Library SDL2.dll (needed by ...\Steam\bin\gldriverquery.exe) not found
+    ///
+    /// Use SDL's official VC development archive instead of DLL
+    /// mirror sites. We install the 32-bit DLL into Steam/bin
+    /// because the failing helper is `gldriverquery.exe` (not
+    /// `gldriverquery64.exe`).
+    ///
+    /// FRAGILITY: this is pinned to an SDL2 release URL. If SDL
+    /// removes old GitHub release assets, bump `sdl2Version` and
+    /// keep `sdl2ArchivePath` in sync with the archive layout.
+    private static let sdl2Version = "2.32.10"
+    private static let sdl2ArchivePath = "SDL2-\(sdl2Version)/lib/x86/SDL2.dll"
+    private static var sdl2DownloadURL: URL {
+        URL(
+            string: "https://github.com/libsdl-org/SDL/releases/download/release-\(sdl2Version)/SDL2-devel-\(sdl2Version)-VC.zip"
+        )!
+    }
+
     /// Shared installer cache so a single download serves every
     /// bottle the user creates.
     static var cachedInstallerURL: URL {
@@ -257,6 +280,116 @@ enum SteamInstaller {
             )
         }
         log("Steam.exe verified at the canonical path.")
+    }
+
+    /// Repair runtime helper DLLs Steam's self-update sometimes
+    /// omits. Called both by generic RunSession Steam launches and
+    /// safe to call after the install pipeline; no-op if the files
+    /// already exist.
+    static func ensureSteamSupportDLLs(
+        in bottle: Bottle,
+        log: @Sendable @escaping (String) -> Void
+    ) async throws {
+        guard SteamLibraryScanner.hasSteam(in: bottle) else { throw Failure.steamNotInstalled }
+
+        let steamBin = SteamLibraryScanner.steamInstallURL(for: bottle)
+            .appendingPathComponent("bin", isDirectory: true)
+        let glDriverQuery = steamBin.appendingPathComponent("gldriverquery.exe")
+        let sdl2Destination = steamBin.appendingPathComponent("SDL2.dll")
+
+        guard FileManager.default.fileExists(atPath: glDriverQuery.path) else {
+            log("Steam helper gldriverquery.exe is not present — SDL2 repair not needed.")
+            return
+        }
+
+        if fileSize(sdl2Destination) > 0 {
+            log("✓ Steam SDL2.dll already present in Steam/bin.")
+            return
+        }
+
+        log("Steam helper gldriverquery.exe needs SDL2.dll; installing official SDL2 \(sdl2Version) runtime into Steam/bin…")
+        let zip = try await ensureSDL2ArchiveDownloaded(log: log)
+        let staged = try await extractSDL2DLL(from: zip, log: log)
+
+        try FileManager.default.createDirectory(
+            at: sdl2Destination.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try? FileManager.default.removeItem(at: sdl2Destination)
+        try FileManager.default.copyItem(at: staged, to: sdl2Destination)
+        _ = try? await ShellRunner.runToCompletion(
+            "/usr/bin/xattr",
+            arguments: ["-dr", "com.apple.quarantine", sdl2Destination.path]
+        )
+
+        guard fileSize(sdl2Destination) > 0 else {
+            throw Failure.installerFailed("SDL2.dll copy completed but Steam/bin/SDL2.dll is still missing.")
+        }
+
+        log("✓ Installed SDL2.dll for Steam's gldriverquery.exe helper.")
+    }
+
+    private static func ensureSDL2ArchiveDownloaded(
+        log: @Sendable @escaping (String) -> Void
+    ) async throws -> URL {
+        let dir = AppState.supportDirectory
+            .appendingPathComponent("Downloads", isDirectory: true)
+            .appendingPathComponent("SteamSupport", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        let dest = dir.appendingPathComponent("SDL2-devel-\(sdl2Version)-VC.zip")
+        if fileSize(dest) > 1_000_000 {
+            log("Using cached SDL2 \(sdl2Version) archive (\(formatBytes(fileSize(dest)))).")
+            return dest
+        }
+
+        log("Downloading SDL2 \(sdl2Version) from libsdl-org…")
+        var request = URLRequest(url: sdl2DownloadURL)
+        request.timeoutInterval = 180
+
+        do {
+            let (tempURL, response) = try await URLSession.shared.download(for: request)
+            if let http = response as? HTTPURLResponse,
+               !(200...299).contains(http.statusCode) {
+                throw Failure.downloadFailed("SDL2 \(sdl2Version): HTTP \(http.statusCode).")
+            }
+            try? FileManager.default.removeItem(at: dest)
+            try FileManager.default.moveItem(at: tempURL, to: dest)
+            log("Downloaded SDL2 archive (\(formatBytes(fileSize(dest)))).")
+            return dest
+        } catch let failure as Failure {
+            throw failure
+        } catch {
+            throw Failure.downloadFailed("SDL2 \(sdl2Version): \(error.localizedDescription)")
+        }
+    }
+
+    private static func extractSDL2DLL(
+        from zip: URL,
+        log: @Sendable @escaping (String) -> Void
+    ) async throws -> URL {
+        let extractDir = AppState.supportDirectory
+            .appendingPathComponent("SteamSupport", isDirectory: true)
+            .appendingPathComponent("SDL2-\(sdl2Version)", isDirectory: true)
+        try? FileManager.default.removeItem(at: extractDir)
+        try FileManager.default.createDirectory(at: extractDir, withIntermediateDirectories: true)
+
+        log("Extracting SDL2.dll from SDL2-devel-\(sdl2Version)-VC.zip…")
+        let result = try await ShellRunner.runToCompletion(
+            "/usr/bin/unzip",
+            arguments: ["-q", zip.path, sdl2ArchivePath, "-d", extractDir.path]
+        )
+        guard result.exitCode == 0 else {
+            throw Failure.installerFailed(
+                "Couldn't extract SDL2.dll from SDL archive (unzip exited \(result.exitCode)). \(result.stderr)"
+            )
+        }
+
+        let staged = extractDir.appendingPathComponent(sdl2ArchivePath)
+        guard fileSize(staged) > 0 else {
+            throw Failure.installerFailed("SDL2 archive extracted but \(sdl2ArchivePath) was not found.")
+        }
+        return staged
     }
 
     /// Steam launch flags for the GPTK / Wine 7.7 legacy fallback.
@@ -998,5 +1131,9 @@ enum SteamInstaller {
         let fmt = ByteCountFormatter()
         fmt.countStyle = .file
         return fmt.string(fromByteCount: bytes)
+    }
+
+    private static func fileSize(_ url: URL) -> Int64 {
+        (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64) ?? 0
     }
 }
