@@ -5,7 +5,7 @@
 > source (MIT).
 
 <!--
-  TODO before tagging v0.1.4:
+  TODO before tagging v0.1.5:
   Drop a hero screenshot in docs/screenshots/library.png and uncomment
   the line below. Recommended: the library grid with a few games
   installed, taken at 2× retina, 1600×1000 region.
@@ -26,7 +26,7 @@ handles the Wine glue so you don't have to.
 ## Download
 
 <!--
-  TODO before tagging v0.1.4:
+  TODO before tagging v0.1.5:
   Replace the URL below with the real GitHub Releases link.
   Generated automatically by the release workflow once the
   `THEGOD371/carafe` placeholder in `project.yml` (SUFeedURL) and
@@ -34,7 +34,7 @@ handles the Wine glue so you don't have to.
   with the real repo slug.
 -->
 
-**[Download Carafe 0.1.4 (.dmg)](https://github.com/THEGOD371/carafe/releases/latest)**
+**[Download Carafe 0.1.5 (.dmg)](https://github.com/THEGOD371/carafe/releases/latest)**
 
 ## First-launch — Gatekeeper bypass
 
@@ -93,11 +93,11 @@ already present; you don't need to set them up manually.
   and similar kernel-level anti-cheat systems require Windows
   drivers Wine can't host. Multiplayer games that gate behind them
   will not work and are explicitly out of scope.
-- **Steam sign-in is rough.** Steam's CEF/Chromium login UI renders
-  poorly inside Wine on macOS. The workaround set (Winetricks PR
-  #1975) is applied automatically, but sign-in can still be flaky.
-  Once you're signed in, headless `-applaunch <appid>` works
-  reliably.
+- **Steam sign-in is still experimental.** Wine Staging keeps the
+  modern CEF/Chromium UI alive better than GPTK, and Carafe applies
+  the GPU/DLL workaround set automatically. If Steam self-updates and
+  the window goes black again, rerun "Install Steam in Bottle…" for
+  that bottle before launching Steam.
 - **32-bit Windows apps won't run on GPTK bottles.** GPTK is
   64-bit-only. Use Wine Staging if your app is 32-bit; Carafe
   detects the binary's architecture and refuses to launch
@@ -122,7 +122,7 @@ Then build & run the `Carafe` scheme.
 
 ```bash
 ./Tools/build-dmg.sh
-# → Carafe-0.1.4.dmg in the repo root
+# → Carafe-0.1.5.dmg in the repo root
 ```
 
 The script auto-installs `create-dmg` via Homebrew on first run,
@@ -149,7 +149,7 @@ TESTING.md A-bis for the gory details).
 Releases are cut by pushing a `v*` tag:
 
 ```bash
-git tag v0.1.4
+git tag v0.1.5
 git push --tags
 ```
 

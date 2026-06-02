@@ -223,7 +223,7 @@ struct InstallSteamSheet: View {
                     .foregroundStyle(.green)
                 }
                 if SteamLibraryScanner.hasSteam(in: bottle) {
-                    Text("This bottle already has Steam at the canonical path. Re-running is harmless and useful for re-applying the steamwebhelper workaround after a Steam update.")
+                    Text("This bottle already has Steam at the canonical path. Re-running is harmless and useful for re-applying Steam UI fixes after a Steam update.")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -275,9 +275,15 @@ struct InstallSteamSheet: View {
         case .verify:
             return "<1 s"
         case .disableWebHelper:
-            return "tries an immediate rename"
+            if selectedBottle?.wineBuild == .wineStaging {
+                return "modern CEF UI fixes"
+            }
+            return "legacy fallback for GPTK"
         case .firstLaunchBootstrap:
-            return "launches Steam, waits up to 3 min for CEF"
+            if selectedBottle?.wineBuild == .wineStaging {
+                return "not needed on Wine Staging"
+            }
+            return "GPTK only: downloads CEF before rename"
         }
     }
 
@@ -505,33 +511,57 @@ struct InstallSteamSheet: View {
         }
         progress.setState(.succeeded, for: .verify)
 
-        // Step 5: try the fast-path rename (no Steam launch needed).
-        // On a fresh install this almost always returns .notFound
-        // because Steam's bootstrapper downloads CEF lazily on first
-        // launch — that case is handled by step 6 below.
+        // Step 5: Steam UI workaround.
+        //
+        // Wine Staging can run current Steam's CEF UI if we disable
+        // the broken GPU / DirectComposition paths. GPTK's Wine 7.7
+        // remains too old, so only GPTK keeps the legacy webhelper
+        // rename fallback.
         progress.setState(.running, for: .disableWebHelper)
-        let webHelperResult = SteamInstaller.disableSteamWebHelper(
-            in: bottle, log: appendLog
-        )
-        switch webHelperResult {
-        case .disabled:
-            progress.setState(.succeeded, for: .disableWebHelper)
-        case .alreadyDisabled:
-            progress.setState(.skipped("already disabled"), for: .disableWebHelper)
-        case .notFound:
-            progress.setState(
-                .skipped("not present yet — step 6 will trigger Steam to download it"),
-                for: .disableWebHelper
+        var needsLegacyBootstrap = false
+        if bottle.wineBuild == .wineStaging {
+            do {
+                try await SteamInstaller.configureModernSteamUIWorkarounds(
+                    in: bottle, log: appendLog
+                )
+                progress.setState(.succeeded, for: .disableWebHelper)
+            } catch {
+                progress.setState(
+                    .warning("Couldn't persist Steam UI workaround: \(error.localizedDescription). Launch will still try runtime flags."),
+                    for: .disableWebHelper
+                )
+            }
+        } else {
+            let webHelperResult = SteamInstaller.disableSteamWebHelper(
+                in: bottle, log: appendLog
             )
+            switch webHelperResult {
+            case .disabled:
+                progress.setState(.succeeded, for: .disableWebHelper)
+            case .alreadyDisabled:
+                progress.setState(.skipped("already disabled"), for: .disableWebHelper)
+            case .notFound:
+                needsLegacyBootstrap = true
+                progress.setState(
+                    .skipped("not present yet — step 6 will trigger Steam to download it"),
+                    for: .disableWebHelper
+                )
+            }
         }
 
-        // Step 6: first-launch CEF bootstrap. Skip when step 5
-        // already handled it; otherwise launch Steam, poll for the
-        // file to appear, rename, kill Steam.
+        // Step 6: first-launch CEF bootstrap. Wine Staging no longer
+        // needs this because it keeps modern CEF enabled; GPTK still
+        // uses it to provoke Steam's lazy download before renaming
+        // steamwebhelper.
         progress.setState(.running, for: .firstLaunchBootstrap)
-        if webHelperResult == .disabled || webHelperResult == .alreadyDisabled {
+        if bottle.wineBuild == .wineStaging {
             progress.setState(
-                .skipped("step 5 already disabled steamwebhelper"),
+                .skipped("Wine Staging uses modern Steam UI mode"),
+                for: .firstLaunchBootstrap
+            )
+        } else if !needsLegacyBootstrap {
+            progress.setState(
+                .skipped("step 5 already handled the legacy UI fallback"),
                 for: .firstLaunchBootstrap
             )
         } else {
@@ -590,8 +620,8 @@ final class SteamInstallProgress: ObservableObject {
         case download            = "Download SteamSetup.exe"
         case runInstaller        = "Run installer (silent)"
         case verify              = "Verify Steam.exe"
-        case disableWebHelper    = "Disable steamwebhelper (legacy UI)"
-        case firstLaunchBootstrap = "First launch (downloading CEF)"
+        case disableWebHelper    = "Configure Steam UI"
+        case firstLaunchBootstrap = "Legacy CEF bootstrap"
 
         var id: String { rawValue }
     }

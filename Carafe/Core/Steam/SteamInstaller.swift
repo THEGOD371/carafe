@@ -7,7 +7,7 @@ import Foundation
 ///   2. Download SteamSetup.exe to the shared cache.
 ///   3. Run SteamSetup.exe /S inside the bottle (silent NSIS install).
 ///   4. Verify Steam.exe at the canonical path.
-///   5. Disable steamwebhelper.exe to force Steam's legacy UI mode.
+///   5. Configure Steam UI workarounds.
 ///
 /// All steps are independent async methods so the UI can run them in
 /// sequence and surface per-step success/failure independently.
@@ -23,26 +23,25 @@ import Foundation
 /// "Restart with Browser Sandboxing disabled" recovery option
 /// doesn't permanently fix it.
 ///
-/// Carafe's current mitigation is the legacy-UI workaround in step 5:
-/// rename steamwebhelper.exe so Steam falls back to its old WinAPI
-/// UI, which works fine on Wine 7.7. This loses the friends panel,
-/// the embedded store browser, and the React login — but the client
-/// is *usable* and games launch.
+/// Carafe's mitigation is now split by Wine build:
 ///
-/// The proper fix is a newer wine. Gcenx ships `gcenx/wine/wine-crossover`
-/// at Wine 8.0.1 (CrossOver 23.7.1 sources), free and Apple-Silicon-
-/// native. Adding multi-wine-version support to BottleManager so a
-/// Steam bottle can opt into wine-crossover is sketched as a next-
-/// milestone task, not done here.
+///   - GPTK / Wine 7.7: legacy fallback. Rename steamwebhelper.exe
+///     after bootstrap because modern CEF does not survive here.
+///   - Wine Staging: modern Steam UI mode. Keep steamwebhelper.exe
+///     and disable CEF GPU / problematic Wine DLLs instead.
 ///
-/// ## ⚠️ Auto-update overwrites our workaround
+/// The practical fix is a newer wine. Carafe's Steam bottle path now
+/// uses Wine Staging and keeps modern CEF enabled instead of trying
+/// to force Steam's removed legacy UI.
 ///
-/// Steam's self-update runs on every launch and **restores
-/// steamwebhelper.exe** if it's missing. So our rename is a one-shot:
-/// after a Steam client update the user will see the crash again and
-/// needs to re-run "Install Steam in Bottle…" (we detect the install
-/// is present, skip the heavy steps, and re-run only the webhelper
-/// disable). Documented in TESTING.md.
+/// ## ⚠️ Auto-update can undo UI setup
+///
+/// Steam's self-update runs often and can replace both Steam.exe and
+/// steamwebhelper.exe. For Wine Staging we keep webhelper enabled and
+/// re-apply the CEF GPU/DLL overrides whenever the user reruns
+/// "Install Steam in Bottle…". For GPTK's older Wine 7.7 fallback we
+/// still rename webhelper after bootstrap, but that mode is only kept
+/// as a degraded fallback.
 ///
 /// ## ⚠️ Canonical Steam-on-Wine workaround
 ///
@@ -56,9 +55,12 @@ import Foundation
 /// Pieces:
 ///   - Env: `WINEDLLOVERRIDES="libglesv2=disabled;dcomp=disabled"`
 ///   - Env: `METAL_DEVICE_WRAPPER_TYPE=1`
-///   - Flags: `-no-cef-sandbox -noreactlogin -nofriendsui
-///            -skipinitialbootstrap -windowed -allosarches
-///            -cef-force-32bit -cef-in-process-gpu`
+///   - Wine Staging flags: `-no-cef-sandbox -cef-disable-gpu
+///            -cef-disable-gpu-compositing -cef-in-process-gpu
+///            -windowed -allosarches`
+///   - GPTK legacy flags: `-no-cef-sandbox -noreactlogin
+///            -nofriendsui -skipinitialbootstrap -windowed
+///            -allosarches -cef-force-32bit -cef-in-process-gpu`
 ///   - Winetricks: `nocrashdialog` (suppresses wine's modal crash
 ///     dialog when `vulkandriverquery` / `vulkandriverquery64`
 ///     misbehave on macOS).
@@ -87,13 +89,11 @@ import Foundation
 ///    that path. Manual / GUI installs to elsewhere won't be
 ///    detected by SteamLibraryScanner without code changes.
 ///
-/// 4. **steamwebhelper.exe location.** `bin/cef/cef.win7x64/` is the
-///    current relative path. Steam has moved CEF between
-///    subdirectories over the years (cef.win7, cef.win7x64,
-///    cef.win10, etc.); if a future Steam update changes the path,
-///    `disableSteamWebHelper` finds nothing and the legacy-UI
-///    workaround silently doesn't kick in. Log the miss but don't
-///    fail the install.
+/// 4. **steamwebhelper.exe location.** Steam moves CEF between
+///    subdirectories over time (cef.win7, cef.win7x64, cef.win64,
+///    etc.). The legacy GPTK fallback uses a recursive search rather
+///    than hardcoded paths. For Wine Staging, seeing webhelper present
+///    is good: current Steam needs it to draw login/library UI.
 ///
 /// 5. **Removed Steam flags.** `-noreactlogin` (and `-no-browser`)
 ///    were deprecated by Valve in the 2023 Steam Client Beta and
@@ -259,7 +259,7 @@ enum SteamInstaller {
         log("Steam.exe verified at the canonical path.")
     }
 
-    /// Steam launch flags we pass for the legacy-UI / Wine workaround.
+    /// Steam launch flags for the GPTK / Wine 7.7 legacy fallback.
     /// The set below is the **canonical Wine + Steam macOS workaround**
     /// from [Winetricks PR #1975](https://github.com/Winetricks/winetricks/pull/1975),
     /// which is the upstream-community-blessed reference. Apply ALL
@@ -292,7 +292,7 @@ enum SteamInstaller {
     ///                              in-process rather than spawning
     ///                              a separate one (the separate
     ///                              spawn crashes hard on Mac).
-    static let steamLaunchFlags = [
+    static let legacySteamLaunchFlags = [
         "-no-cef-sandbox",
         "-noreactlogin",
         "-nofriendsui",
@@ -302,6 +302,36 @@ enum SteamInstaller {
         "-cef-force-32bit",
         "-cef-in-process-gpu",
     ]
+
+    /// Steam launch flags for Wine Staging's modern CEF UI.
+    ///
+    /// The old `-noreactlogin`, `-nofriendsui`, and
+    /// `-skipinitialbootstrap` flags are deliberately absent here:
+    /// current Steam is CEF-first, so trying to suppress CEF tends to
+    /// produce the exact "nothing useful appears" behavior users see.
+    ///
+    /// Sources checked during the 2026 refresh:
+    ///   - Steam's own steamwebhelper help recommends restarting with
+    ///     GPU acceleration disabled for rendering failures.
+    ///   - ValveSoftware/steam-for-linux#10561 documents black UI
+    ///     recovering with `-cef-disable-gpu`.
+    ///   - Wine bug 44985 / WineHQ forum guidance still points at
+    ///     disabling `libglesv2` for CEF black windows.
+    static let modernSteamLaunchFlags = [
+        "-no-cef-sandbox",
+        "-cef-disable-gpu",
+        "-cef-disable-gpu-compositing",
+        "-cef-in-process-gpu",
+        "-windowed",
+        "-allosarches",
+    ]
+
+    static func steamLaunchFlags(for build: WineBuild) -> [String] {
+        switch build {
+        case .gptk: return legacySteamLaunchFlags
+        case .wineStaging: return modernSteamLaunchFlags
+        }
+    }
 
     /// Convenience: launch Steam GUI inside a bottle (non-blocking).
     /// Used by the post-install "Launch Steam to sign in" button.
@@ -337,7 +367,7 @@ enum SteamInstaller {
         // quoting weirdness in the executable path.
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments =
-            [WineRunner.wine64Path(for: bottle.wineBuild), steamExe.path] + steamLaunchFlags
+            [WineRunner.wine64Path(for: bottle.wineBuild), steamExe.path] + steamLaunchFlags(for: bottle.wineBuild)
 
         var env = ProcessInfo.processInfo.environment
         env["WINEPREFIX"] = bottle.prefixURL.path
@@ -346,13 +376,7 @@ enum SteamInstaller {
         env["PATH"] = ShellRunner.defaultPath
         env["WINEDEBUG"] = "fixme-all"
         env["WINEMSYNC"] = "1"
-        // CEF / browser disables. Both env vars are checked by the
-        // Steam client and by Chromium inside steamwebhelper.exe —
-        // belt and braces in case our file-rename workaround missed
-        // (e.g., Steam restored the file after an update and the
-        // user hasn't re-run our pipeline yet).
         env["WEBKIT_DISABLE_COMPOSITING_MODE"] = "1"
-        env["STEAM_DISABLE_BROWSER"] = "1"
 
         // --- Black-window / steamwebhelper workarounds ---
         //
@@ -381,6 +405,12 @@ enum SteamInstaller {
         env["WINEDLLOVERRIDES"] = "libglesv2=disabled;dcomp=disabled"
         env["METAL_DEVICE_WRAPPER_TYPE"] = "1"
 
+        if bottle.wineBuild == .gptk {
+            // Legacy fallback only. On Wine Staging this breaks the
+            // current Steam client because the modern UI is CEF.
+            env["STEAM_DISABLE_BROWSER"] = "1"
+        }
+
         for (k, v) in bottle.environment { env[k] = v }
         process.environment = env
 
@@ -402,6 +432,100 @@ enum SteamInstaller {
             throw Failure.launchFailed(error.localizedDescription)
         }
         launchTracker.track(process)
+    }
+
+    // MARK: - Modern Steam UI workaround
+
+    /// Configure Wine Staging bottles to run current Steam's CEF UI
+    /// instead of trying to force the removed/fragile legacy UI.
+    ///
+    /// We set the `libglesv2` / `dcomp` overrides both at launch time
+    /// (WINEDLLOVERRIDES in `launchSteamGUI`) and persistently for
+    /// `steamwebhelper.exe` via Wine's AppDefaults registry. The
+    /// registry piece matters because Steam launches webhelper as a
+    /// child process; depending on Steam's self-update path, the
+    /// child does not always behave like the original Steam.exe
+    /// process.
+    ///
+    /// FRAGILITY: Wine's disabled DLL override is represented in the
+    /// registry as an empty string (`""`), matching WineHQ forum
+    /// guidance for bug 44985. If Wine changes that representation,
+    /// this helper will still be harmless but the black-window fix
+    /// may stop applying.
+    static func configureModernSteamUIWorkarounds(
+        in bottle: Bottle,
+        log: @Sendable @escaping (String) -> Void
+    ) async throws {
+        guard bottle.wineBuild == .wineStaging else {
+            log("GPTK bottle detected — modern Steam UI mode is unavailable on Wine 7.7.")
+            return
+        }
+        guard WineRunner.isWineAvailable(for: bottle.wineBuild) else { throw Failure.wineMissing }
+
+        log("Configuring Wine Staging for modern Steam UI mode…")
+        restoreSteamWebHelperIfNeeded(in: bottle, log: log)
+
+        let key = #"HKEY_CURRENT_USER\Software\Wine\AppDefaults\steamwebhelper.exe\DllOverrides"#
+
+        var env = ProcessInfo.processInfo.environment
+        env["WINEPREFIX"] = bottle.prefixURL.path
+        env["WINE"] = WineRunner.wine64Path(for: bottle.wineBuild)
+        env["WINESERVER"] = WineRunner.wineserverPath(for: bottle.wineBuild)
+        env["PATH"] = ShellRunner.defaultPath
+        env["WINEDEBUG"] = "fixme-all"
+        env["WINEMSYNC"] = "1"
+
+        let overrides = ["libglesv2", "dcomp"]
+        for dll in overrides {
+            var lastError = ""
+            for try await event in ShellRunner.stream(
+                WineRunner.wine64Path(for: bottle.wineBuild),
+                arguments: ["reg", "add", key, "/v", dll, "/t", "REG_SZ", "/d", "", "/f"],
+                environment: env
+            ) {
+                switch event {
+                case .stdout(let line):
+                    log(line)
+                case .stderr(let line):
+                    lastError = line
+                    log(line)
+                case .exit(let code):
+                    if code != 0 {
+                        throw Failure.installerFailed(
+                            "Couldn't configure Steam UI DLL override for \(dll) (reg exited \(code)). \(lastError)"
+                        )
+                    }
+                }
+            }
+        }
+        log("Steam UI mode configured: steamwebhelper stays enabled, CEF GPU rendering is disabled, and libglesv2/dcomp are disabled for steamwebhelper.exe.")
+    }
+
+    /// Undo Carafe's older legacy-UI workaround for Wine Staging.
+    /// Current Steam needs steamwebhelper for login/library rendering;
+    /// leaving only `.disabled-by-carafe` in place guarantees a dead
+    /// or empty UI.
+    private static func restoreSteamWebHelperIfNeeded(
+        in bottle: Bottle,
+        log: @Sendable @escaping (String) -> Void
+    ) {
+        let scan = findSteamWebHelperFiles(in: bottle)
+        guard scan.real.isEmpty, let disabled = scan.renamed.first else {
+            if !scan.real.isEmpty {
+                log("steamwebhelper.exe is present — keeping modern Steam UI enabled.")
+            }
+            return
+        }
+
+        let restored = disabled.deletingLastPathComponent()
+            .appendingPathComponent("steamwebhelper.exe")
+        do {
+            try FileManager.default.moveItem(at: disabled, to: restored)
+            let steamRoot = SteamLibraryScanner.steamInstallURL(for: bottle)
+            log("Restored steamwebhelper.exe from \(relativePath(disabled, from: steamRoot)) for modern Steam UI mode.")
+        } catch {
+            log("⚠️ Couldn't restore steamwebhelper.exe: \(error.localizedDescription). Steam may repair it during self-update; if the UI still does not appear, re-run Install Steam.")
+        }
     }
 
     // MARK: - steamwebhelper legacy-UI workaround
