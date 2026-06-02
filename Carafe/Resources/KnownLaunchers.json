@@ -40,6 +40,11 @@
       },
       "fix": {
         "skipLauncherTo": "Engine/Binaries/Win64r/wwm.exe",
+        "skipLauncherCandidates": [
+          "Engine/Binaries/Win64r/wwm.exe",
+          "Engine/Binaries/Win64rh/wwm.exe",
+          "wwm.exe"
+        ],
         "windowsVersion": "win10",
         "graphicsBackend": "d3dMetal",
         "winetricksVerbs": ["vcrun2022"],
@@ -47,7 +52,30 @@
         "environment": {
           "WINE_LARGE_ADDRESS_AWARE": "1"
         },
-        "notes": "⚠ DEPLOY vs _DEPLOY: WWM's installer leaves TWO launcher.exe files side-by-side — one in Win32/deploy/ (correct) and one in Win32/_deploy/ (staging leftover, missing the Qt5 DLLs). If you see Qt5Widgets.dll / Qt5Core.dll / Qt5Gui.dll / Qt5Network.dll / CrashHunter_PC3.dll / detect.dll / dxgi.dll \"not found\" errors, you picked the wrong one — re-add the game and navigate to Program Files/wwm/Win32/deploy/launcher.exe (no underscore). Wine's working-directory resolution is fine; both Carafe and the launcher walk up from launcher.exe's parent folder, so picking the _deploy variant means Qt5 looks for its DLLs in _deploy/ where they don't exist.\n\nSTRONG RECOMMENDATION: skip the launcher entirely. The launcher is used only for updates — once the game is downloaded, the actual game runs from Engine/Binaries/Win64r/wwm.exe (or Win64rh/wwm.exe for HK/Macau/Taiwan servers on the Steam build) and the Steam community confirms users routinely launch directly even on Windows. The NetEase standalone install lays out differently (Program Files/wwm/...); look for wwm.exe inside the install tree and point Carafe there. If you DO want to fix the launcher itself: re-run the WWM updater to complete the asset download so the Qt5 DLLs are in place, and make sure you launch from Win32/deploy/ (without underscore).\n\nNOTE: DXVK conflicts with GPTK on the same bottle (both ship d3d11/dxgi.dll) — this profile pins graphicsBackend to D3DMetal so it's safe on either GPTK or Wine Staging bottles. If you want DXVK specifically (Wine Staging only), override per-game in the Compat sheet.",
+        "requiredDLLs": [
+          {
+            "name": "Qt5Svg.dll",
+            "sourceURL": "https://download.qt.io/online/qtsdkrepository/windows_x86/desktop/qt5_5152/qt.qt5.5152.win64_msvc2019_64/5.15.2-0-202011130602qtsvg-Windows-Windows_10-MSVC2019-Windows-Windows_10-X86_64.7z",
+            "archivePath": "5.15.2/msvc2019_64/bin/Qt5Svg.dll",
+            "destinationPath": "Qt5Svg.dll",
+            "sha256": "22daa63531f2eed8aeec02e047b73641739fa9d0288a5d2db4da25baf3a005a7"
+          }
+        ],
+        "failureSignals": [
+          {
+            "logPath": "launcher.log",
+            "contains": "not support avx",
+            "message": "WWM's launcher reports `not support avx`. Apple Silicon/Rosetta does not expose AVX instructions to Windows code, so this launcher may be unable to complete the game download/update on this Mac. If WWM later ships a non-AVX launcher/game build, update this profile; for now this is a hard compatibility warning rather than a missing DLL problem."
+          }
+        ],
+        "preserveWineserverOnExit": true,
+        "postExitHandoff": {
+          "executablePath": "updater.exe",
+          "triggerLogPath": "launcher.log",
+          "triggerLogContains": "StartUpdateExe success.",
+          "arguments": []
+        },
+        "notes": "⚠ DEPLOY vs _DEPLOY: WWM's installer leaves TWO launcher.exe files side-by-side — one in Win32/deploy/ (correct) and one in Win32/_deploy/ (staging leftover, missing the Qt5 DLLs). If you see Qt5Widgets.dll / Qt5Core.dll / Qt5Gui.dll / Qt5Network.dll / CrashHunter_PC3.dll / detect.dll / dxgi.dll \"not found\" errors, you picked the wrong one — re-add the game and navigate to Program Files/wwm/Win32/deploy/launcher.exe (no underscore). Wine's working-directory resolution is fine; both Carafe and the launcher walk up from launcher.exe's parent folder, so picking the _deploy variant means Qt5 looks for its DLLs in _deploy/ where they don't exist. Carafe now provisions Qt5Svg.dll automatically from Qt's official 5.15.2 MSVC2019 qtsvg archive and places it beside the selected launcher exe before launch.\n\nSTRONG RECOMMENDATION: skip the launcher entirely when possible. The launcher is used only for updates — once the game is downloaded, the actual game runs from Engine/Binaries/Win64r/wwm.exe (or Win64rh/wwm.exe for HK/Macau/Taiwan servers on the Steam build). The NetEase standalone install lays out differently (Program Files/wwm/...); look for wwm.exe inside the install tree and point Carafe there.\n\nNOTE: DXVK conflicts with GPTK on the same bottle (both ship d3d11/dxgi.dll) — this profile pins graphicsBackend to D3DMetal so it's safe on either GPTK or Wine Staging bottles. If you want DXVK specifically (Wine Staging only), override per-game in the Compat sheet.",
         "confidence": "partial",
         "lastVerified": "2026-06-01"
       }

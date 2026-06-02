@@ -272,6 +272,8 @@ struct LibraryGridView: View {
                                 onShowInFinder: { showInFinder(game) },
                                 onRemove: { deleteCandidate = game },
                                 onRelocateExe: { relocateExe(for: game) },
+                                canSwitchToGameExecutable: knownLauncherTarget(for: game) != nil,
+                                onSwitchToGameExecutable: { switchToKnownLauncherTarget(for: game) },
                                 onRemap: { remapCandidate = game },
                                 onInstallComponents: {
                                     if let bottle = library.bottle(for: game) {
@@ -366,6 +368,26 @@ struct LibraryGridView: View {
         library.relocate(game, to: url)
     }
 
+    private func knownLauncherTarget(for game: Game) -> URL? {
+        guard let bottle = library.bottle(for: game),
+              library.status(of: game) == .ok
+        else { return nil }
+        let exeURL = game.exePath.resolve(bottle: bottle)
+        return KnownLauncherTargetResolver.targetForLauncher(
+            exeURL: exeURL,
+            bottle: bottle
+        )
+    }
+
+    private func switchToKnownLauncherTarget(for game: Game) {
+        guard let bottle = library.bottle(for: game),
+              let target = knownLauncherTarget(for: game)
+        else { return }
+        var updated = game
+        updated.exePath = .from(exeURL: target, bottle: bottle)
+        library.update(updated)
+    }
+
     /// Open NSOpenPanel filtered to image types, set the picked file
     /// as the game's cover art (copied into the cache).
     private func pickLocalCover(for game: Game) {
@@ -393,6 +415,8 @@ struct GameTileView: View {
     let onShowInFinder: () -> Void
     let onRemove: () -> Void
     let onRelocateExe: () -> Void
+    let canSwitchToGameExecutable: Bool
+    let onSwitchToGameExecutable: () -> Void
     let onRemap: () -> Void
     let onInstallComponents: () -> Void
     let onEditCompatibility: () -> Void
@@ -575,6 +599,9 @@ struct GameTileView: View {
             Divider()
         }
         Button("Edit…", action: onEdit)
+        if canSwitchToGameExecutable {
+            Button("Switch to Game Executable", action: onSwitchToGameExecutable)
+        }
         Button("Compatibility…", action: onEditCompatibility)
         Menu("Set cover art") {
             Button("Use local image…", action: onPickLocalCover)

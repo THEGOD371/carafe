@@ -86,7 +86,40 @@ struct LaunchGameSheet: View {
             preflightError = "The exe is missing: \(exeURL.path). From the library, right-click → Relocate exe, or remove the entry."
             return
         }
-        startNewSession(bottle: bottle, exeURL: exeURL)
+        let launchURL = switchToRealGameIfAvailable(game: game, bottle: bottle, exeURL: exeURL)
+        if launchURL == exeURL,
+           let profile = KnownLaunchers.match(exeURL: exeURL),
+           profile.fix.skipLauncherTo != nil
+        {
+            // The launcher is still needed until it has downloaded
+            // the real game exe. Do NOT block here: first-run users
+            // need the launcher to create the files we later switch
+            // to. Once `KnownLauncherTargetResolver` sees the real
+            // exe, the next launch rewrites the library entry.
+            NSLog(
+                "Carafe: %@ launcher target not found yet; running launcher so it can install files.",
+                profile.displayName
+            )
+        }
+        startNewSession(bottle: bottle, exeURL: launchURL)
+    }
+
+    /// Known launcher profiles can identify the real game exe that
+    /// appears after a launcher finishes downloading files. If that
+    /// target now exists, update the library entry and launch it
+    /// instead of making the user browse the prefix by hand.
+    private func switchToRealGameIfAvailable(game: Game, bottle: Bottle, exeURL: URL) -> URL {
+        guard let target = KnownLauncherTargetResolver.targetForLauncher(
+            exeURL: exeURL,
+            bottle: bottle
+        ) else {
+            return exeURL
+        }
+
+        var updated = game
+        updated.exePath = .from(exeURL: target, bottle: bottle)
+        library.update(updated)
+        return target
     }
 
     private func startNewSession(bottle: Bottle, exeURL: URL) {
@@ -125,12 +158,13 @@ struct LaunchGameSheet: View {
             session = nil
             return
         }
+        let launchURL = switchToRealGameIfAvailable(game: game, bottle: bottle, exeURL: exeURL)
         let old = session
         Task {
             if let old, old.state.isLive { await old.stop() }
             await old?.cleanup()
             await MainActor.run {
-                startNewSession(bottle: bottle, exeURL: exeURL)
+                startNewSession(bottle: bottle, exeURL: launchURL)
             }
         }
     }

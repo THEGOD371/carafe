@@ -88,6 +88,8 @@ final class RunSession: ObservableObject, Identifiable {
     private var process: Process?
     private var userInitiatedStop = false
     private var didFireSessionEnded = false
+    private var emittedLauncherDiagnostics = Set<String>()
+    private var didRunPostExitHandoff = false
     private let logCap = 5_000
 
     init(bottle: Bottle, exeURL: URL, config: ResolvedConfig) {
@@ -156,6 +158,38 @@ final class RunSession: ObservableObject, Identifiable {
             "Config: \(config.graphicsBackend.displayName), \(config.sync.displayName), Windows \(config.windowsVersion.displayName)\(config.metalHUD ? ", Metal HUD on" : "")\(config.retina ? ", Retina" : "")",
             stream: .info
         )
+
+        let launcherProfile = KnownLaunchers.match(exeURL: exeURL)
+
+        // --- Provision known-launcher DLLs ---
+        //
+        // Some launchers ship incomplete dependency folders on macOS
+        // installs. WWM is the first concrete case: its launcher can
+        // be missing Qt5Svg.dll, and users cannot reliably download
+        // that DLL by hand without a Windows Qt install. Keep this
+        // as a profile-driven preflight rather than WWM-specific
+        // launch code so future launcher quirks can be handled by
+        // `KnownLaunchers.json`.
+        if let profile = launcherProfile,
+           profile.fix.requiredDLLs?.isEmpty == false
+        {
+            do {
+                try await LauncherDLLProvisioner.provision(
+                    for: profile,
+                    bottle: bottle,
+                    exeURL: exeURL
+                ) { [weak self] line in
+                    Task { @MainActor [weak self] in
+                        self?.appendLog(line, stream: .info)
+                    }
+                }
+            } catch {
+                transition(to: .failed(reason:
+                    "Launcher dependency setup failed: \(error.localizedDescription)"
+                ))
+                return
+            }
+        }
 
         // --- Install DXMT into the bottle on first .dxmt launch ---
         //
@@ -282,6 +316,7 @@ final class RunSession: ObservableObject, Identifiable {
             try proc.run()
             process = proc
             transition(to: .running(pid: proc.processIdentifier))
+            scheduleLauncherDiagnostics(profile: launcherProfile)
         } catch {
             transition(to: .failed(reason:
                 "Couldn't launch wine: \(error.localizedDescription)"
@@ -318,6 +353,13 @@ final class RunSession: ObservableObject, Identifiable {
     /// the UI after a terminal state so re-launches start cold.
     /// Idempotent.
     func cleanup() async {
+        if shouldPreserveWineserverAfterNaturalExit {
+            appendLog(
+                "Leaving wineserver running because this launcher may have handed off to an updater/downloader.",
+                stream: .info
+            )
+            return
+        }
         await WineRunner.shutdownWineserver(prefix: bottle.prefixURL, build: bottle.wineBuild)
     }
 
@@ -368,6 +410,24 @@ final class RunSession: ObservableObject, Identifiable {
 
     private func handleTermination(exitCode: Int32) {
         process = nil
+        let profile = KnownLaunchers.match(exeURL: exeURL)
+        emitLauncherDiagnostics(profile: profile)
+
+        if !userInitiatedStop,
+           !didRunPostExitHandoff,
+           let handoff = resolvedPostExitHandoff(profile: profile)
+        {
+            didRunPostExitHandoff = true
+            appendLog(
+                "Launcher exited after requesting a handoff; launching \(handoff.lastPathComponent).",
+                stream: .info
+            )
+            Task { @MainActor [weak self] in
+                self?.launchHandoffProcess(exe: handoff, profile: profile)
+            }
+            return
+        }
+
         if userInitiatedStop {
             transition(to: .killed)
         } else {
@@ -376,7 +436,112 @@ final class RunSession: ObservableObject, Identifiable {
         // Defensive: wineserver may have leftover children even
         // after a natural exit. Kick it to make sure the next
         // launch in this prefix starts from a clean state.
-        Task { await WineRunner.shutdownWineserver(prefix: bottle.prefixURL, build: bottle.wineBuild) }
+        //
+        // Known-launcher exception: WWM exits after logging
+        // `StartUpdateExe success`, handing off to updater.exe in
+        // the same prefix. Killing wineserver here kills that child
+        // before it can download the game. Profiles opt into this
+        // preserve behavior with `preserveWineserverOnExit`.
+        if shouldPreserveWineserverAfterNaturalExit {
+            appendLog(
+                "Launcher exited; preserving wineserver so any updater/download process can continue.",
+                stream: .info
+            )
+        } else {
+            Task { await WineRunner.shutdownWineserver(prefix: bottle.prefixURL, build: bottle.wineBuild) }
+        }
+    }
+
+    private func resolvedPostExitHandoff(profile: LauncherProfile?) -> URL? {
+        guard let profile,
+              let handoff = profile.fix.postExitHandoff,
+              KnownLauncherDiagnostics.logContains(
+                handoff.triggerLogContains,
+                logPath: handoff.triggerLogPath,
+                bottle: bottle,
+                exeURL: exeURL
+              )
+        else { return nil }
+
+        let url = KnownLauncherPathResolver.resolve(
+            handoff.executablePath,
+            bottle: bottle,
+            exeURL: exeURL
+        )
+        guard FileManager.default.fileExists(atPath: url.path),
+              PEValidator.looksLikePE(at: url)
+        else { return nil }
+
+        return url
+    }
+
+    private func launchHandoffProcess(exe handoffURL: URL, profile: LauncherProfile?) {
+        transition(to: .launching)
+
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: WineRunner.wine64Path(for: bottle.wineBuild))
+        let extraArgs = profile?.fix.postExitHandoff?.arguments ?? []
+        proc.arguments = [handoffURL.path] + extraArgs
+        proc.currentDirectoryURL = handoffURL.deletingLastPathComponent()
+        proc.environment = buildEnvironment()
+
+        appendLog("Working directory: \(handoffURL.deletingLastPathComponent().path)", stream: .info)
+        if !extraArgs.isEmpty {
+            appendLog("Arguments: \(extraArgs.joined(separator: " "))", stream: .info)
+        }
+
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        proc.standardOutput = stdoutPipe
+        proc.standardError = stderrPipe
+        proc.standardInput = FileHandle.nullDevice
+
+        let stdoutBuffer = LineBuffer { [weak self] line in
+            Task { @MainActor [weak self] in
+                self?.appendLog(line, stream: .stdout)
+            }
+        }
+        let stderrBuffer = LineBuffer { [weak self] line in
+            Task { @MainActor [weak self] in
+                self?.appendLog(line, stream: .stderr)
+            }
+        }
+
+        stdoutPipe.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            if data.isEmpty {
+                handle.readabilityHandler = nil
+            } else {
+                stdoutBuffer.append(data)
+            }
+        }
+        stderrPipe.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            if data.isEmpty {
+                handle.readabilityHandler = nil
+            } else {
+                stderrBuffer.append(data)
+            }
+        }
+
+        proc.terminationHandler = { [weak self] terminated in
+            stdoutBuffer.flush()
+            stderrBuffer.flush()
+            let exitCode = terminated.terminationStatus
+            Task { @MainActor [weak self] in
+                self?.handleTermination(exitCode: exitCode)
+            }
+        }
+
+        do {
+            try proc.run()
+            process = proc
+            transition(to: .running(pid: proc.processIdentifier))
+        } catch {
+            transition(to: .failed(reason:
+                "Couldn't launch \(handoffURL.lastPathComponent): \(error.localizedDescription)"
+            ))
+        }
     }
 
     private func appendLog(_ text: String, stream: LogStream) {
@@ -386,5 +551,34 @@ final class RunSession: ObservableObject, Identifiable {
         if logLines.count > logCap {
             logLines.removeFirst(logLines.count - logCap)
         }
+    }
+
+    private func scheduleLauncherDiagnostics(profile: LauncherProfile?) {
+        guard let profile, profile.fix.failureSignals?.isEmpty == false else { return }
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 8_000_000_000)
+            await MainActor.run { [weak self] in
+                self?.emitLauncherDiagnostics(profile: profile)
+            }
+        }
+    }
+
+    private func emitLauncherDiagnostics(profile: LauncherProfile?) {
+        guard let profile else { return }
+        let messages = KnownLauncherDiagnostics.messages(
+            for: profile,
+            bottle: bottle,
+            exeURL: exeURL
+        )
+        for message in messages where emittedLauncherDiagnostics.insert(message).inserted {
+            appendLog("⚠️ \(message)", stream: .info)
+        }
+    }
+
+    private var shouldPreserveWineserverAfterNaturalExit: Bool {
+        guard !userInitiatedStop,
+              let profile = KnownLaunchers.match(exeURL: exeURL)
+        else { return false }
+        return profile.fix.preserveWineserverOnExit == true
     }
 }

@@ -22,6 +22,11 @@ import Foundation
 ///    normalisation. Edge cases with shellexpansion shouldn't occur
 ///    because the URL comes from NSOpenPanel which produces canonical
 ///    file URLs.
+/// 4. **Provisioned DLL sources.** `requiredDLLs` may point at
+///    third-party archives whose layout can change. The provisioner
+///    verifies that the requested DLL exists after extract and fails
+///    loudly before launch instead of leaving the user with a Wine
+///    "module not found" dialog.
 enum KnownLaunchers {
 
     // MARK: - Public surface
@@ -104,6 +109,22 @@ struct LauncherProfile: Decodable, Identifiable, Hashable, Sendable {
     /// the UI badge colour on the recognise-card.
     enum Confidence: String, Decodable, Sendable {
         case high, medium, pending
+
+        init(from decoder: Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            switch raw.lowercased() {
+            case "high": self = .high
+            case "medium", "partial": self = .medium
+            case "pending": self = .pending
+            default:
+                throw DecodingError.dataCorrupted(
+                    .init(
+                        codingPath: decoder.codingPath,
+                        debugDescription: "Unknown launcher confidence: \(raw)"
+                    )
+                )
+            }
+        }
     }
 
     struct LauncherFix: Decodable, Hashable, Sendable {
@@ -113,6 +134,13 @@ struct LauncherProfile: Decodable, Identifiable, Hashable, Sendable {
         /// user's exe pick because they may have a reason for picking
         /// the launcher specifically.
         let skipLauncherTo: String?
+
+        /// Extra candidate paths for the real game exe. Same
+        /// resolution semantics as `skipLauncherTo`: each path is
+        /// tried relative to the launcher folder and each ancestor
+        /// inside the bottle. Useful for regional or Steam builds
+        /// where a launcher writes multiple Win64 folders.
+        let skipLauncherCandidates: [String]?
 
         /// Raw values matching `WindowsVersion`'s rawValue / `GraphicsBackend`'s
         /// rawValue. nil = inherit from bottle.
@@ -131,12 +159,80 @@ struct LauncherProfile: Decodable, Identifiable, Hashable, Sendable {
         /// Extra env vars. Maps onto Game.environment at apply time.
         let environment: [String: String]?
 
+        /// DLLs Carafe can fetch and place before launching this
+        /// profile. Unlike `dllOverrides`, these are actual files
+        /// copied beside the launcher/game exe or into the prefix.
+        let requiredDLLs: [RequiredDLL]?
+
+        /// Log/file signatures that indicate a known failure mode.
+        /// Carafe surfaces these in the live run log so users don't
+        /// have to inspect launcher-specific logs by hand.
+        let failureSignals: [FailureSignal]?
+
+        /// Some launchers intentionally exit after spawning an
+        /// updater/downloader process in the same Wine prefix. The
+        /// default RunSession cleanup kills wineserver after a
+        /// natural exit to avoid zombies; this flag opts a profile
+        /// out so the child updater can keep running.
+        let preserveWineserverOnExit: Bool?
+
+        /// Optional executable to run after the launcher exits, if a
+        /// log contains `triggerLogContains`. This covers launchers
+        /// that log a handoff like "StartUpdateExe success" but Wine
+        /// fails to keep the child updater alive.
+        let postExitHandoff: PostExitHandoff?
+
         /// Human-readable explanation shown in the card. Should
         /// include any caveats / known limitations.
         let notes: String?
 
         let confidence: Confidence?
         let lastVerified: String?
+    }
+
+    struct RequiredDLL: Decodable, Hashable, Sendable {
+        /// Human-readable name and final filename, e.g. `Qt5Svg.dll`.
+        let name: String
+
+        /// Direct downloadable source archive. Supported today:
+        /// `.7z`, `.zip`, and raw `.dll`.
+        let sourceURL: String
+
+        /// Optional exact path inside the archive. If omitted,
+        /// Carafe recursively searches the extracted archive for
+        /// `name`.
+        let archivePath: String?
+
+        /// Destination. Relative paths are resolved beside the exe.
+        /// Supported tokens:
+        ///   `{exeDir}/Qt5Svg.dll`
+        ///   `{prefix}/drive_c/windows/system32/Qt5Svg.dll`
+        /// A bare `Qt5Svg.dll` means "next to the picked exe".
+        let destinationPath: String?
+
+        /// Optional SHA-256 for the downloaded archive/raw DLL.
+        /// nil means "trust TLS + source host".
+        let sha256: String?
+    }
+
+    struct FailureSignal: Decodable, Hashable, Sendable {
+        /// Path to inspect. Relative paths are resolved beside the
+        /// launcher exe. Supports `{exeDir}` and `{prefix}` tokens.
+        let logPath: String
+
+        /// Case-insensitive substring that signals the failure.
+        let contains: String
+
+        /// Human-readable explanation to show in Carafe logs.
+        let message: String
+    }
+
+    struct PostExitHandoff: Decodable, Hashable, Sendable {
+        /// Relative to exe dir unless using {exeDir}/{prefix}.
+        let executablePath: String
+        let triggerLogPath: String
+        let triggerLogContains: String
+        let arguments: [String]?
     }
 
     // MARK: - Apply
@@ -183,6 +279,10 @@ struct LauncherProfile: Decodable, Identifiable, Hashable, Sendable {
         if let env = fix.environment, !env.isEmpty {
             let formatted = env.keys.sorted().joined(separator: ", ")
             lines.append("Env vars → \(formatted)")
+        }
+        if let dlls = fix.requiredDLLs, !dlls.isEmpty {
+            let formatted = dlls.map(\.name).sorted().joined(separator: ", ")
+            lines.append("Provision DLLs → \(formatted)")
         }
         return lines
     }

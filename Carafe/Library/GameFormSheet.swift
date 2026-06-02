@@ -248,9 +248,22 @@ struct GameFormSheet: View {
             }
 
             if let skipTo = profile.fix.skipLauncherTo {
-                Text("Tip: the launcher tends to crash under Wine. The actual game exe is usually at `\(skipTo)` — point Carafe there instead and skip the launcher.")
+                Text("Tip: the launcher is usually only needed for updates/downloads. Once the game files exist, Carafe can switch this entry to `\(skipTo)` and launch the game directly.")
                     .font(.caption).foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
+
+                if let target = resolvedKnownLauncherTarget(for: profile) {
+                    Button {
+                        exeURL = target
+                        detectedLauncher = KnownLaunchers.match(exeURL: target)
+                        dismissedDetection = true
+                    } label: {
+                        Label("Use game executable now", systemImage: "arrow.triangle.branch")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .help(target.path)
+                }
             }
 
             if let notes = profile.fix.notes, !notes.isEmpty {
@@ -345,6 +358,15 @@ struct GameFormSheet: View {
         if let url = components.url {
             NSWorkspace.shared.open(url)
         }
+    }
+
+    private func resolvedKnownLauncherTarget(for profile: LauncherProfile) -> URL? {
+        guard let bottle = selectedBottle, let exeURL else { return nil }
+        return KnownLauncherTargetResolver.targetForLauncher(
+            exeURL: exeURL,
+            bottle: bottle,
+            profile: profile
+        )
     }
 
     private var exeRow: some View {
