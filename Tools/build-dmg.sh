@@ -18,8 +18,9 @@
 #      not, so a fresh CI runner doesn't need extra setup steps).
 #   2. Regenerates the procedural DMG background.
 #   3. Builds Carafe in Release configuration into an isolated
-#      DerivedData under Tools/build/ (does not interfere with the
-#      developer's interactive Xcode session).
+#      DerivedData under /tmp by default (does not interfere with the
+#      developer's interactive Xcode session, and avoids File Provider
+#      xattrs when the repo lives in Documents/iCloud).
 #   4. Copies the built .app out of DerivedData into the staging dir.
 #   5. Runs `create-dmg` with the canonical layout
 #      (660×400 window, 128 px icons, volume "Carafe <version>").
@@ -57,7 +58,7 @@ set -euo pipefail
 
 # ---- Configuration ----
 
-VERSION="${CARAFE_VERSION:-0.1.2}"
+VERSION="${CARAFE_VERSION:-0.1.3}"
 APP_NAME="Carafe"
 DMG_NAME="${APP_NAME}-${VERSION}.dmg"
 VOLUME_NAME="${APP_NAME} ${VERSION}"
@@ -69,7 +70,11 @@ ICON_SIZE=128
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-BUILD_DIR="${REPO_ROOT}/Tools/build"
+# Keep build products outside Documents/iCloud-style File Provider
+# locations. Those can attach com.apple.fileprovider.fpfs / FinderInfo
+# xattrs to Sparkle's nested apps, which makes installed copies fail
+# deep codesign verification.
+BUILD_DIR="${CARAFE_BUILD_DIR:-${TMPDIR:-/tmp}/carafe-release-build}"
 DERIVED_DATA="${BUILD_DIR}/DerivedData"
 STAGING_APP="${BUILD_DIR}/${APP_NAME}.app"
 BACKGROUND="${BUILD_DIR}/dmg-background.png"
@@ -88,7 +93,7 @@ echo "✓ create-dmg: $(command -v create-dmg)"
 # ---- 2. Background image ----
 
 echo "→ Generating DMG background…"
-( cd "${REPO_ROOT}" && CARAFE_VERSION="${VERSION}" swift Tools/generate-dmg-background.swift )
+( cd "${REPO_ROOT}" && CARAFE_VERSION="${VERSION}" CARAFE_BUILD_DIR="${BUILD_DIR}" swift Tools/generate-dmg-background.swift )
 if [[ ! -f "${BACKGROUND}" ]]; then
     echo "✗ Background image was not produced at ${BACKGROUND}" >&2
     exit 1
@@ -199,9 +204,18 @@ codesign --force --options runtime \
     --sign "${SIGN_ID}" \
     "${RELEASE_APP}"
 
-# Sanity check.
+# Final strip after signing. Sparkle's nested updater can retain
+# FinderInfo / FileProvider xattrs on recent macOS builds; those make
+# a copied app fail deep codesign verification even though the top
+# level app looks fine. Stripping xattrs does not invalidate the
+# signature because the signature data lives in CodeResources and
+# Mach-O headers, not in extended attributes.
+xattr -cr "${RELEASE_APP}"
+
+# Sanity check. Use deep+strict here because the normal verifier can
+# miss nested Sparkle updater metadata that breaks installed copies.
 echo "→ Verifying signature…"
-codesign --verify --verbose "${RELEASE_APP}" 2>&1 | sed 's/^/    /'
+codesign --verify --deep --strict --verbose=2 "${RELEASE_APP}" 2>&1 | sed 's/^/    /'
 
 # ---- 5. Stage the .app ----
 
@@ -213,6 +227,9 @@ cp -R "${RELEASE_APP}" "${STAGING_APP}"
 # (Finder-driven copies sometimes do; cp -R doesn't, but cheap to
 # be sure).
 xattr -cr "${STAGING_APP}" || true
+
+echo "→ Verifying staged app…"
+codesign --verify --deep --strict --verbose=2 "${STAGING_APP}" 2>&1 | sed 's/^/    /'
 
 # ---- 5. Build the .dmg ----
 

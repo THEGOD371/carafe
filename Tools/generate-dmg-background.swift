@@ -2,7 +2,7 @@
 
 // Procedural DMG background generator.
 //
-// Produces `Tools/build/dmg-background.png` (1320×800 pixels = 2× the
+// Produces `dmg-background.png` in CARAFE_BUILD_DIR (1320×800 pixels = 2× the
 // 660×400-point Finder window we'll show), drawn in the same wine-
 // purple gradient as the app icon so the install experience reads as
 // one continuous brand surface.
@@ -42,7 +42,7 @@ import AppKit
 import CoreGraphics
 import Foundation
 
-let carafeVersion = ProcessInfo.processInfo.environment["CARAFE_VERSION"] ?? "0.1.2"
+let carafeVersion = ProcessInfo.processInfo.environment["CARAFE_VERSION"] ?? "0.1.3"
 import ImageIO
 import UniformTypeIdentifiers
 
@@ -187,7 +187,7 @@ func writePNG(_ image: CGImage, to url: URL) {
 // MARK: - Driver
 
 let repoRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-let outDir = repoRoot.appendingPathComponent("Tools/build")
+let outDir = URL(fileURLWithPath: ProcessInfo.processInfo.environment["CARAFE_BUILD_DIR"] ?? repoRoot.appendingPathComponent("Tools/build").path)
 try FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
 let outURL = outDir.appendingPathComponent("dmg-background.png")
 
