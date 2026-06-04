@@ -89,6 +89,7 @@ final class RunSession: ObservableObject, Identifiable {
     private var userInitiatedStop = false
     private var didFireSessionEnded = false
     private var emittedLauncherDiagnostics = Set<String>()
+    private var emittedWineNoiseNotes = Set<String>()
     private var didRunPostExitHandoff = false
     private var isSteamLaunch = false
     private var didPreserveWineserverAfterExit = false
@@ -617,7 +618,27 @@ final class RunSession: ObservableObject, Identifiable {
     private func appendLog(_ text: String, stream: LogStream) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        logLines.append(.init(timestamp: Date(), stream: stream, text: trimmed))
+
+        var displayedText = trimmed
+        var displayedStream = stream
+
+        // FRAGILITY: Wine writes some optional-subsystem probes to stderr
+        // with `err:` severity even when the launched app does not use that
+        // subsystem. Treating every such line as a missing dependency leads
+        // users to install unrelated winetricks verbs into otherwise healthy
+        // bottles. Keep this list narrow and only reclassify messages whose
+        // harmless meaning has been verified against Wine's source.
+        if stream == .stderr,
+           trimmed.localizedCaseInsensitiveContains(
+               "kerberos_LsaApInitializePackage no Kerberos support"
+           ) {
+            let noteKey = "wine-kerberos-unavailable"
+            guard emittedWineNoiseNotes.insert(noteKey).inserted else { return }
+            displayedText = "Wine domain authentication is unavailable. Most games and desktop apps do not use it, so this can usually be ignored."
+            displayedStream = .info
+        }
+
+        logLines.append(.init(timestamp: Date(), stream: displayedStream, text: displayedText))
         if logLines.count > logCap {
             logLines.removeFirst(logLines.count - logCap)
         }
