@@ -3,6 +3,7 @@ import Foundation
 /// Windows version a bottle reports to Windows applications.
 /// Stored in metadata, applied to the prefix via `wine reg add HKCU\Software\Wine`.
 enum WindowsVersion: String, Codable, CaseIterable, Identifiable, Sendable {
+    case winxp
     case win7
     case win8
     case win81
@@ -13,6 +14,7 @@ enum WindowsVersion: String, Codable, CaseIterable, Identifiable, Sendable {
 
     var displayName: String {
         switch self {
+        case .winxp: return "Windows XP (legacy)"
         case .win7:  return "Windows 7"
         case .win8:  return "Windows 8"
         case .win81: return "Windows 8.1"

@@ -169,9 +169,15 @@ final class RunSession: ObservableObject, Identifiable {
             )
         }
         appendLog(
-            "Config: \(config.graphicsBackend.displayName), \(config.sync.displayName), Windows \(config.windowsVersion.displayName)\(config.metalHUD ? ", Metal HUD on" : "")\(config.retina ? ", Retina" : "")",
+            "Config: \(config.graphicsBackend.displayName), \(config.sync.displayName), Windows \(launchWindowsVersion.displayName)\(config.metalHUD ? ", Metal HUD on" : "")\(config.retina ? ", Retina" : "")",
             stream: .info
         )
+        if usesRainmeterGDIFallback {
+            appendLog(
+                "Rainmeter 3.3.3 detected — using its Windows XP / GDI+ fallback to avoid Wine's broken Direct2D path.",
+                stream: .info
+            )
+        }
 
         if isSteamLaunch {
             // Steam's updater/CEF children can survive after the
@@ -294,7 +300,7 @@ final class RunSession: ObservableObject, Identifiable {
         // reported version.
         await WineRunner.setWindowsVersion(
             prefix: bottle.prefixURL,
-            version: config.windowsVersion,
+            version: launchWindowsVersion,
             build: bottle.wineBuild
         ) { [weak self] line in
             Task { @MainActor [weak self] in
@@ -438,6 +444,25 @@ final class RunSession: ObservableObject, Identifiable {
             SteamInstaller.applySteamLaunchEnvironment(to: &base, bottle: bottle)
         }
         return base
+    }
+
+    /// Rainmeter 3.3.3 normally selects Direct2D when Wine reports
+    /// Windows 7 or newer. On macOS, both WineD3D and GPTK currently
+    /// fail Rainmeter's repeated DXGID3D10CreateDevice requests,
+    /// leaving visible windows that do not respond while consuming
+    /// most of a CPU core. Reporting Windows XP makes this release
+    /// use its built-in GDI+ renderer, which is responsive.
+    ///
+    /// FRAGILITY: this is deliberately limited to the verified 3.3.3
+    /// fallback build. Modern Rainmeter releases require Direct2D
+    /// and cannot use this workaround.
+    private var usesRainmeterGDIFallback: Bool {
+        exeURL.lastPathComponent.caseInsensitiveCompare("Rainmeter.exe") == .orderedSame
+            && exeURL.path.localizedCaseInsensitiveContains("Rainmeter 3.3.3")
+    }
+
+    private var launchWindowsVersion: WindowsVersion {
+        usesRainmeterGDIFallback ? .winxp : config.windowsVersion
     }
 
     private func transition(to newState: State) {
@@ -672,10 +697,10 @@ final class RunSession: ObservableObject, Identifiable {
     /// FRAGILITY: Rainmeter 4.3+ moved its renderer entirely to
     /// Direct2D. On Wine Staging/macOS that currently reaches
     /// WineD3D's OpenGL framebuffer path and crashes. The last
-    /// GDI+-based official release, Rainmeter 3.3.3, avoids that
-    /// path. Re-test this diagnostic when Wine's Direct2D/macOS
-    /// implementation changes; it should become unnecessary once
-    /// modern Rainmeter renders successfully.
+    /// GDI+-capable official release, Rainmeter 3.3.3, only avoids
+    /// that path when Wine reports Windows XP; RunSession applies
+    /// that verified fallback above. Re-test this diagnostic when
+    /// Wine's Direct2D/macOS implementation changes.
     private func emitCapturedOutputDiagnostics() {
         guard exeURL.lastPathComponent.caseInsensitiveCompare("Rainmeter.exe") == .orderedSame,
               !exeURL.path.localizedCaseInsensitiveContains("Rainmeter 3.3.3")
@@ -687,7 +712,7 @@ final class RunSession: ObservableObject, Identifiable {
         else { return }
 
         appendLog(
-            "⚠️ Modern Rainmeter uses Direct2D, which currently crashes in Wine's macOS graphics stack. Use the official Rainmeter 3.3.3 GDI+ build instead and point the library entry at its Rainmeter.exe.",
+            "⚠️ Modern Rainmeter uses Direct2D, which currently crashes in Wine's macOS graphics stack. Use the official Rainmeter 3.3.3 build instead; Carafe will automatically enable its Windows XP / GDI+ fallback.",
             stream: .info
         )
     }
