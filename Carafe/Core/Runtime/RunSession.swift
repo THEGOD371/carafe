@@ -469,6 +469,7 @@ final class RunSession: ObservableObject, Identifiable {
         process = nil
         let profile = KnownLaunchers.match(exeURL: exeURL)
         emitLauncherDiagnostics(profile: profile)
+        emitCapturedOutputDiagnostics()
 
         if !userInitiatedStop,
            !didRunPostExitHandoff,
@@ -642,6 +643,32 @@ final class RunSession: ObservableObject, Identifiable {
         for message in messages where emittedLauncherDiagnostics.insert(message).inserted {
             appendLog("⚠️ \(message)", stream: .info)
         }
+    }
+
+    /// Explain a small set of failures that only appear in captured
+    /// stdout/stderr rather than an application-owned log file.
+    ///
+    /// FRAGILITY: Rainmeter 4.3+ moved its renderer entirely to
+    /// Direct2D. On Wine Staging/macOS that currently reaches
+    /// WineD3D's OpenGL framebuffer path and crashes. The last
+    /// GDI+-based official release, Rainmeter 3.3.3, avoids that
+    /// path. Re-test this diagnostic when Wine's Direct2D/macOS
+    /// implementation changes; it should become unnecessary once
+    /// modern Rainmeter renders successfully.
+    private func emitCapturedOutputDiagnostics() {
+        guard exeURL.lastPathComponent.caseInsensitiveCompare("Rainmeter.exe") == .orderedSame,
+              !exeURL.path.localizedCaseInsensitiveContains("Rainmeter 3.3.3")
+        else { return }
+
+        let output = logLines.map(\.text).joined(separator: "\n")
+        guard output.localizedCaseInsensitiveContains("GL_INVALID_FRAMEBUFFER_OPERATION"),
+              output.localizedCaseInsensitiveContains("Unhandled page fault")
+        else { return }
+
+        appendLog(
+            "⚠️ Modern Rainmeter uses Direct2D, which currently crashes in Wine's macOS graphics stack. Use the official Rainmeter 3.3.3 GDI+ build instead and point the library entry at its Rainmeter.exe.",
+            stream: .info
+        )
     }
 
     private func shouldPreserveWineserverAfterNaturalExit(
