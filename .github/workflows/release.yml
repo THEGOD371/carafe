@@ -42,6 +42,14 @@ jobs:
     # objectVersion=77 (Xcode 16+) that the brewed xcodegen emits.
     runs-on: macos-latest
     timeout-minutes: 30
+    env:
+      # Secrets used in a step-level `if` must be promoted to job env;
+      # a step-local env block is not available while GitHub evaluates
+      # whether the step should run.
+      SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+      # GitHub is removing Node 20 from hosted runners in September
+      # 2026. Opt in now so action runtime changes cannot break a tag.
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
       - name: Checkout source
@@ -116,8 +124,6 @@ jobs:
       - name: Sign DMG with Sparkle EdDSA key
         id: sign
         if: steps.sparkle.outputs.found == 'true' && env.SPARKLE_ED_PRIVATE_KEY != ''
-        env:
-          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
         run: |
           dmg="Carafe-${{ steps.version.outputs.version }}.dmg"
           # Restore the base64 private key to a file. sign_update reads
