@@ -96,12 +96,18 @@ enum KnownLauncherTargetResolver {
         current: URL,
         profile: LauncherProfile
     ) -> URL? {
-        let names = Set(
-            ([profile.fix.skipLauncherTo?.split(separator: "/").last.map(String.init)]
-             + (profile.fix.skipLauncherCandidates ?? []).map { $0.split(separator: "/").last.map(String.init) }
-             + (profile.match.exeNames ?? []).map(Optional.some))
-                .compactMap { $0?.lowercased() }
-        )
+        var candidateNames: [String] = []
+        if let primaryName = profile.fix.skipLauncherTo?.split(separator: "/").last {
+            candidateNames.append(String(primaryName))
+        }
+        for path in profile.fix.skipLauncherCandidates ?? [] {
+            if let name = path.split(separator: "/").last {
+                candidateNames.append(String(name))
+            }
+        }
+        candidateNames.append(contentsOf: profile.match.exeNames ?? [])
+
+        let names = Set(candidateNames.map { $0.lowercased() })
         guard !names.isEmpty else { return nil }
 
         let enumerator = FileManager.default.enumerator(

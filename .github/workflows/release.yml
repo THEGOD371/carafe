@@ -1,8 +1,8 @@
 # GitHub Actions release workflow.
 #
 # Fires on every `v*` tag push (`git tag v0.1.0 && git push --tags`).
-# Builds the .dmg on a macOS-14 runner (Apple Silicon, matches our
-# deployment target), signs the artefact with Sparkle's EdDSA key
+# Builds the .dmg on GitHub's current macOS runner, signs the artefact
+# with Sparkle's EdDSA key
 # (if the secret is configured), generates appcast.xml, and
 # attaches both to the GitHub Release as downloadable assets.
 #
@@ -14,9 +14,9 @@
 # pre-key-generation; users can still download manually.
 #
 # FRAGILITY:
-# * macos-14 image keeps Apple's tooling fresh, but Apple shifts
-#   default Xcode versions between runner image refreshes — pin
-#   below if a build ever breaks suddenly.
+# * GitHub may leave an older Xcode selected even when newer versions
+#   are installed. The workflow selects the newest installed Xcode
+#   before generating or compiling the project.
 # * `softprops/action-gh-release` is a third-party action. Pinned
 #   to a major version; revisit if its API changes.
 # * `sign_update` lives deep in the Sparkle SPM checkout's bin/ dir
@@ -56,6 +56,19 @@ jobs:
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "Building Carafe ${version} from tag ${tag}"
+
+      - name: Select newest installed Xcode
+        run: |
+          xcode_app="$(
+            find /Applications -maxdepth 1 -type d -name 'Xcode_*.app' -print |
+              sort -V |
+              tail -1
+          )"
+          if [[ -z "$xcode_app" ]]; then
+            xcode_app="/Applications/Xcode.app"
+          fi
+          echo "Selecting $xcode_app"
+          sudo xcode-select -s "$xcode_app/Contents/Developer"
 
       - name: Show runner Xcode
         # Diagnostic only — surface what we're building against so a

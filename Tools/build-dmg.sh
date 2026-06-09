@@ -10,7 +10,7 @@
 #
 # Usage:
 #
-#     ./Tools/build-dmg.sh                # builds Carafe-0.1.8.dmg
+#     ./Tools/build-dmg.sh                # builds Carafe-0.1.9.dmg
 #     CARAFE_VERSION=0.2.0 ./Tools/build-dmg.sh
 #
 # What it does, in order:
@@ -58,7 +58,7 @@ set -euo pipefail
 
 # ---- Configuration ----
 
-VERSION="${CARAFE_VERSION:-0.1.8}"
+VERSION="${CARAFE_VERSION:-0.1.9}"
 APP_NAME="Carafe"
 DMG_NAME="${APP_NAME}-${VERSION}.dmg"
 VOLUME_NAME="${APP_NAME} ${VERSION}"
