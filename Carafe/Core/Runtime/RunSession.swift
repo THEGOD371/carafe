@@ -170,6 +170,22 @@ final class RunSession: ObservableObject, Identifiable {
                 "Steam launch detected — applying Steam UI/update handoff workarounds.",
                 stream: .info
             )
+
+            appendLog("Checking access to Steam's update servers…", stream: .info)
+            switch await SteamInstaller.checkConnectivity() {
+            case .available:
+                appendLog("✓ Steam network check passed.", stream: .info)
+            case .blocked(let reason):
+                transition(to: .failed(
+                    reason: SteamInstaller.connectivityFailureMessage(reason)
+                ))
+                return
+            case .unavailable(let detail):
+                appendLog(
+                    "⚠️ Steam network check was inconclusive: \(detail) Launch will continue in case offline mode is available.",
+                    stream: .info
+                )
+            }
         }
         appendLog(
             "Config: \(config.graphicsBackend.displayName), \(config.sync.displayName), \(launchWindowsVersion.displayName)\(config.metalHUD ? ", Metal HUD on" : "")\(config.retina ? ", Retina" : "")",

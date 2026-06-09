@@ -16,6 +16,7 @@ struct InstallSteamSheet: View {
     /// Non-nil triggers an alert. Used for the "Launch Steam" action
     /// so that silent spawn failures aren't lost in the log.
     @State private var launchError: String?
+    @State private var isLaunchingSteam = false
 
     /// Drives a sheet that opens CreateBottleSheet pre-seeded with
     /// `.wineStaging` when the user clicks "Create new
@@ -402,8 +403,18 @@ struct InstallSteamSheet: View {
             Spacer()
             if progress.isFinished {
                 if progress.success {
-                    Button("Launch Steam to sign in") { launchSteam() }
-                        .buttonStyle(.bordered)
+                    Button {
+                        launchSteam()
+                    } label: {
+                        if isLaunchingSteam {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Text("Launch Steam to sign in")
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(isLaunchingSteam)
                 }
                 Button("Close") { dismiss() }
                     .buttonStyle(.borderedProminent)
@@ -595,17 +606,36 @@ struct InstallSteamSheet: View {
             launchError = "No bottle selected."
             return
         }
-        do {
-            try SteamInstaller.launchSteamGUI(in: bottle)
-            progress.appendLog(
-                "Launched Steam GUI in bottle \(bottle.name). First-launch updates take 5–15 minutes — sign in once Steam stops self-updating."
-            )
-        } catch {
-            let msg = error.localizedDescription
-            progress.appendLog("⛔ Launch failed: \(msg)")
-            // Surface to the user via alert in addition to the log so
-            // the failure isn't lost off-screen.
-            launchError = msg
+        isLaunchingSteam = true
+        Task {
+            defer { isLaunchingSteam = false }
+
+            switch await SteamInstaller.checkConnectivity() {
+            case .available:
+                progress.appendLog("✓ Steam network check passed.")
+            case .blocked(let reason):
+                let message = SteamInstaller.connectivityFailureMessage(reason)
+                progress.appendLog("⛔ \(message)")
+                launchError = message
+                return
+            case .unavailable(let detail):
+                progress.appendLog(
+                    "⚠️ Steam network check was inconclusive: \(detail) Launching in case offline mode is available."
+                )
+            }
+
+            do {
+                try SteamInstaller.launchSteamGUI(in: bottle)
+                progress.appendLog(
+                    "Launched Steam GUI in bottle \(bottle.name). First-launch updates take 5–15 minutes — sign in once Steam stops self-updating."
+                )
+            } catch {
+                let msg = error.localizedDescription
+                progress.appendLog("⛔ Launch failed: \(msg)")
+                // Surface to the user via alert in addition to the log so
+                // the failure isn't lost off-screen.
+                launchError = msg
+            }
         }
     }
 }

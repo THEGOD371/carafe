@@ -504,6 +504,77 @@ enum SteamInstaller {
         }
     }
 
+    enum ConnectivityStatus: Sendable {
+        case available
+        case blocked(String)
+        case unavailable(String)
+    }
+
+    /// Check Steam's update endpoint with macOS networking before
+    /// starting Wine. Managed school/work networks commonly intercept
+    /// Steam TLS and return an HTTP block page. Inside Wine this only
+    /// appears as certificate failures, `http error 0`, or a login UI
+    /// that never advances.
+    ///
+    /// FRAGILITY: filtering products and headers vary. Smoothwall uses
+    /// `X-dg-blocked` with a base64-encoded explanation; other filters
+    /// may only return HTTP 403. Unknown network errors remain warnings
+    /// so temporary outages do not permanently block offline Steam use.
+    static func checkConnectivity() async -> ConnectivityStatus {
+        guard let url = URL(string: "https://client-update.steamstatic.com/steam_client_win64") else {
+            return .unavailable("Carafe couldn't construct Steam's update URL.")
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "HEAD"
+        request.timeoutInterval = 12
+        request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else {
+                return .unavailable("Steam's update server returned an unreadable response.")
+            }
+
+            if (200..<400).contains(http.statusCode) {
+                return .available
+            }
+
+            if http.statusCode == 403 {
+                let encodedReason = http.value(forHTTPHeaderField: "X-dg-blocked")
+                let reason = encodedReason.flatMap(decodedFilterReason)
+                    ?? "This network denied access to Steam's servers."
+                return .blocked(reason)
+            }
+
+            return .unavailable(
+                "Steam's update server returned HTTP \(http.statusCode)."
+            )
+        } catch {
+            return .unavailable(error.localizedDescription)
+        }
+    }
+
+    static func connectivityFailureMessage(_ reason: String) -> String {
+        """
+        Steam is blocked by the current network.
+
+        \(reason)
+
+        Connect to a network that permits Steam, such as your home Wi-Fi or a personal hotspot, then try again. Carafe and Wine are launching correctly; the network is refusing Steam's update and sign-in requests.
+        """
+    }
+
+    private static func decodedFilterReason(_ value: String) -> String? {
+        guard let data = Data(base64Encoded: value),
+              let decoded = String(data: data, encoding: .utf8)
+        else {
+            return nil
+        }
+        let trimmed = decoded.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
     /// Convenience: launch Steam GUI inside a bottle (non-blocking).
     /// Used by the post-install "Launch Steam to sign in" button.
     /// We don't track this as a RunSession because Steam's lifetime
