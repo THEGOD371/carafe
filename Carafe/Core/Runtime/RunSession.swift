@@ -90,6 +90,9 @@ final class RunSession: ObservableObject, Identifiable {
     private var didFireSessionEnded = false
     private var emittedLauncherDiagnostics = Set<String>()
     private var emittedWineNoiseNotes = Set<String>()
+    private var isSuppressingMoltenVKCapabilities = false
+    private var didReachMoltenVKInstanceSummary = false
+    private var suppressedMoltenVKLineCount = 0
     private var didRunPostExitHandoff = false
     private var isSteamLaunch = false
     private var didPreserveWineserverAfterExit = false
@@ -169,7 +172,7 @@ final class RunSession: ObservableObject, Identifiable {
             )
         }
         appendLog(
-            "Config: \(config.graphicsBackend.displayName), \(config.sync.displayName), Windows \(launchWindowsVersion.displayName)\(config.metalHUD ? ", Metal HUD on" : "")\(config.retina ? ", Retina" : "")",
+            "Config: \(config.graphicsBackend.displayName), \(config.sync.displayName), \(launchWindowsVersion.displayName)\(config.metalHUD ? ", Metal HUD on" : "")\(config.retina ? ", Retina" : "")",
             stream: .info
         )
         if usesRainmeterGDIFallback {
@@ -647,6 +650,49 @@ final class RunSession: ObservableObject, Identifiable {
         var displayedText = trimmed
         var displayedStream = stream
 
+        // MoltenVK prints its full extension and GPU capability table
+        // during normal startup. A single launch can add hundreds of
+        // lines without describing a failure. Collapse each table to
+        // one useful note, but fail open if an actual Wine error
+        // appears or the expected end marker never arrives.
+        //
+        // FRAGILITY: this relies on MoltenVK's current start/end
+        // markers. The line limit prevents a future format change from
+        // swallowing the rest of a process log indefinitely.
+        if trimmed.hasPrefix("[mvk-info] MoltenVK version") {
+            isSuppressingMoltenVKCapabilities = true
+            didReachMoltenVKInstanceSummary = false
+            suppressedMoltenVKLineCount = 1
+            let noteKey = "moltenvk-capabilities"
+            if emittedWineNoiseNotes.insert(noteKey).inserted {
+                displayedText = "MoltenVK graphics support initialized."
+                displayedStream = .info
+            } else {
+                return
+            }
+        } else if isSuppressingMoltenVKCapabilities {
+            suppressedMoltenVKLineCount += 1
+            let isRealDiagnostic = trimmed.localizedCaseInsensitiveContains("err:")
+                || trimmed.localizedCaseInsensitiveContains("Unhandled exception")
+                || trimmed.localizedCaseInsensitiveContains("page fault")
+            let exceededLimit = suppressedMoltenVKLineCount > 250
+
+            if trimmed.hasPrefix("[mvk-info] Created VkInstance") {
+                didReachMoltenVKInstanceSummary = true
+                return
+            }
+            if didReachMoltenVKInstanceSummary && trimmed.hasPrefix("VK_") {
+                return
+            }
+            if didReachMoltenVKInstanceSummary || isRealDiagnostic || exceededLimit {
+                isSuppressingMoltenVKCapabilities = false
+                didReachMoltenVKInstanceSummary = false
+                suppressedMoltenVKLineCount = 0
+            } else {
+                return
+            }
+        }
+
         // FRAGILITY: Wine writes some optional-subsystem probes to stderr
         // with `err:` severity even when the launched app does not use that
         // subsystem. Treating every such line as a missing dependency leads
@@ -660,6 +706,17 @@ final class RunSession: ObservableObject, Identifiable {
             let noteKey = "wine-kerberos-unavailable"
             guard emittedWineNoiseNotes.insert(noteKey).inserted else { return }
             displayedText = "Wine domain authentication is unavailable. Most games and desktop apps do not use it, so this can usually be ignored."
+            displayedStream = .info
+        }
+
+        if stream == .stderr,
+           usesRainmeterGDIFallback,
+           trimmed.localizedCaseInsensitiveContains("SHELL_ExecuteW cannot set directory"),
+           trimmed.localizedCaseInsensitiveContains("docs.rainmeter.net")
+        {
+            let noteKey = "rainmeter-help-link"
+            guard emittedWineNoiseNotes.insert(noteKey).inserted else { return }
+            displayedText = "Rainmeter tried to open its Help page, but Wine could not pass the legacy link to macOS. Rainmeter itself is still running normally."
             displayedStream = .info
         }
 
