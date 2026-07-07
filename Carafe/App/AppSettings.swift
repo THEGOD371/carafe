@@ -28,6 +28,7 @@ final class AppSettings: ObservableObject {
         static let defaultGraphicsBackend = "carafe.settings.defaultGraphicsBackend"
         static let bottlesLocation        = "carafe.settings.bottlesLocation"
         static let telemetryEnabled       = "carafe.settings.telemetryEnabled"
+        static let appearanceTheme        = "carafe.settings.appearanceTheme"
     }
 
     // MARK: - Published settings
@@ -69,6 +70,14 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    /// App-wide visual theme. `.nothing` is the default — the always-
+    /// dark, monochrome, red-accent look modeled on Nothing OS. Users
+    /// who prefer the stock macOS appearance can switch back in
+    /// Settings → General → Appearance.
+    @Published var appearanceTheme: AppearanceTheme {
+        didSet { UserDefaults.standard.set(appearanceTheme.rawValue, forKey: DefaultsKey.appearanceTheme) }
+    }
+
     /// Opt-in crash reporting + analytics. Default OFF.
     ///
     /// TODO(stability-milestone): wire this to a Sentry SDK init that
@@ -97,6 +106,9 @@ final class AppSettings: ObservableObject {
         } else {
             self.bottlesLocationOverride = nil
         }
+
+        let themeRaw = defaults.string(forKey: DefaultsKey.appearanceTheme) ?? ""
+        self.appearanceTheme = AppearanceTheme(rawValue: themeRaw) ?? .nothing
 
         self.telemetryEnabled = defaults.bool(forKey: DefaultsKey.telemetryEnabled)
     }

@@ -21,6 +21,7 @@ struct CarafeApp: App {
                 .environmentObject(appState.heroicScanner)
                 .environmentObject(appState.epicAuth)
                 .environmentObject(settings)
+                .appearanceTheme(settings.appearanceTheme)
                 .frame(minWidth: 900, minHeight: 600)
         }
         .windowResizability(.contentSize)
@@ -53,6 +54,7 @@ struct CarafeApp: App {
                 .environmentObject(appState)
                 .environmentObject(appState.bottles)
                 .environmentObject(settings)
+                .appearanceTheme(settings.appearanceTheme)
         }
     }
 }

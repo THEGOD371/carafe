@@ -7,7 +7,8 @@ import AppKit
 /// `openSettings` environment value.
 ///
 /// Four tabs:
-///   - General   — telemetry opt-in + SteamGridDB API key shortcut
+///   - General   — appearance theme, telemetry opt-in + SteamGridDB
+///                 API key shortcut
 ///   - Defaults  — Wine build, Windows version, Graphics backend
 ///                 (used to pre-seed new bottles)
 ///   - Storage   — bottles directory override + migrate flow
@@ -49,6 +50,20 @@ private struct GeneralTab: View {
 
     var body: some View {
         Form {
+            Section {
+                Picker("Theme", selection: $settings.appearanceTheme) {
+                    ForEach(AppearanceTheme.allCases) { theme in
+                        Text(theme.displayName).tag(theme)
+                    }
+                }
+                Text(settings.appearanceTheme.summary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } header: {
+                Text("Appearance")
+            }
+
             Section {
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
                     VStack(alignment: .leading, spacing: 2) {
