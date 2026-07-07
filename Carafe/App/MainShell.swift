@@ -6,6 +6,7 @@ import SwiftUI
 /// (defined in `CarafeApp`); Cmd+, does the same.
 struct MainShell: View {
     @EnvironmentObject private var appState: AppState
+    @EnvironmentObject private var settings: AppSettings
     @Environment(\.openSettings) private var openSettings
 
     @State private var section: Section = .library
@@ -35,6 +36,14 @@ struct MainShell: View {
             .frame(minWidth: 160, idealWidth: 180)
         } detail: {
             detailView
+                // Dot-matrix backdrop, visible behind scrollable
+                // content (e.g. the library grid and its empty state).
+                // Views with opaque backgrounds simply cover it.
+                .background {
+                    if settings.appearanceTheme == .nothing {
+                        NothingDotGrid().ignoresSafeArea()
+                    }
+                }
                 .toolbar {
                     ToolbarItem(placement: .navigation) {
                         Picker("Section", selection: $section) {
